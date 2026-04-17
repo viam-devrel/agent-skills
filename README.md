@@ -2,6 +2,8 @@
 
 A suite of Claude Code skills providing deep, source-verified expertise across the Viam robotics platform. Each skill is built from direct analysis of SDK source code and real module repositories — not documentation summaries.
 
+**This library of skills is a work-in-progress. If you have feedback about how to improve any of the skills or ones to add, please file an issue or submit a PR.**
+
 ## Skills
 
 | Skill | Scope | Lines |
@@ -41,27 +43,79 @@ The skills cross-reference each other rather than duplicating knowledge:
 
 ## Installation
 
-### Install all skills to Claude Code
+This repo is published as a **Claude Code plugin marketplace**. You can install the full bundle in one go, or pick individual SDK plugins.
 
-```bash
-# Copy all skills to your Claude Code skills directory
-cp -r skills/viam-* ~/.claude/skills/
+### 1. Add the marketplace
+
+Inside Claude Code, run:
+
+```
+/plugin marketplace add viam-devrel/agent-skills
 ```
 
-### Install a single skill
+This registers the marketplace from the GitHub repo. You can also point at a local clone:
 
-```bash
-cp -r skills/viam-python ~/.claude/skills/
+```
+/plugin marketplace add /path/to/agent-skills
 ```
 
-### Package as .skill files (for sharing)
+### 2. Browse and install
 
-```bash
-cd skills
-for skill in viam-*/; do
-  zip -r "${skill%/}.skill" "$skill"
-done
+Open the interactive picker:
+
 ```
+/plugin
+```
+
+You'll see the `viam-agent-skills` marketplace with these plugins:
+
+| Plugin | What it installs |
+|--------|------------------|
+| `viam-skills` | **Bundled** — all 7 skills below |
+| `viam-go-motion-vision` | Arm, camera, vision, motion planning (Go) |
+| `viam-go-platform` | Non-manipulation Go components, services, resource API |
+| `viam-modules-fleet` | Viam CLI, module lifecycle, fleet/robot config |
+| `viam-python` | Python SDK |
+| `viam-ml` | Data capture, training, model deployment |
+| `viam-cpp` | C++ SDK driver patterns |
+| `viam-typescript` | Browser robot control, HMIs, Viam Applications |
+
+### 3. Install directly (non-interactive)
+
+```
+/plugin install viam-skills@viam-agent-skills
+/plugin install viam-python@viam-agent-skills
+/plugin install viam-cpp@viam-agent-skills
+```
+
+The `@viam-agent-skills` suffix selects this marketplace.
+
+### Picking skills at runtime
+
+Once installed, skills activate automatically based on triggers in their frontmatter (for example, touching a file that imports `@viamrobotics/sdk` activates `viam-typescript`). To invoke a skill manually, use the `Skill` tool or mention the skill by name.
+
+### Updating and removing
+
+```
+/plugin marketplace update viam-agent-skills
+/plugin uninstall viam-python@viam-agent-skills
+```
+
+### Repository layout
+
+```
+.claude-plugin/
+  plugin.json          # bundled "viam-skills" plugin manifest
+  marketplace.json     # marketplace listing (bundle + per-SDK)
+skills/                # canonical skill sources
+  viam-*/
+plugins/               # per-SDK plugin wrappers (symlink into skills/)
+  viam-*/
+    .claude-plugin/plugin.json
+    skills/viam-*  -> ../../../skills/viam-*
+```
+
+The per-SDK plugins are thin wrappers that symlink into `skills/` — there is only one source of truth for each skill.
 
 ## Skill Structure
 
@@ -119,10 +173,3 @@ These skills were built from source analysis circa April 2026. The Viam platform
 - Prefer grepping local source over trusting the reference blindly
 - Acknowledge gaps rather than fabricating API signatures
 - Recommend `pkg.go.dev` or SDK docs for canonical API references
-
-## Design Documents
-
-The design and implementation plans are in [`docs/plans/`](docs/plans/):
-
-- `2026-04-16-viam-skill-suite-design.md` — skill boundaries, cross-references, source map
-- `2026-04-16-viam-skill-suite-implementation.md` — phased build plan with task breakdown
