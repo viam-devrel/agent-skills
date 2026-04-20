@@ -1,21 +1,19 @@
 ---
 name: viam-go-platform
 description: >
-  Deep expert on the Viam RDK and Go SDK for all non-manipulation components,
-  services, and the resource API. Use this skill whenever a developer asks about:
-  Viam Go SDK base, board, motor, servo, sensor, movement_sensor, encoder,
-  gripper, gantry, input_controller, power_sensor, audio_in, audio_out, button,
-  switch, pose_tracker, or generic components; navigation, SLAM, data_manager,
+  Expert on the Viam RDK and Go SDK for non-manipulation components, services,
+  and the resource API. Use whenever a developer asks about: Viam Go SDK base,
+  board, motor, servo, sensor, movement_sensor, encoder, gripper, gantry,
+  input_controller, power_sensor, audio_in, audio_out, button, switch,
+  pose_tracker, or generic components; navigation, SLAM, data_manager,
   discovery, world_state_store, or base_remote_control services; the resource
   package (Resource interface, API/Model registration, config validation,
   dependency injection, module development patterns); board GPIO, analog, PWM,
-  digital interrupt sub-resources; or any Go code that imports Viam component/
-  service packages outside of arm/camera/vision/motion. Also trigger when a
-  user shares Go code that imports `go.viam.com/rdk/components/base`,
-  `go.viam.com/rdk/components/motor`, `go.viam.com/rdk/resource`, etc. and wants
-  help building, debugging, or designing around it. For manipulation/vision/motion
-  topics see: viam-go-motion-vision. For CLI/modules/fleet see: viam-modules-fleet.
-  For Python SDK see: viam-python. For ML see: viam-ml.
+  digital interrupt sub-resources; or any Go code importing
+  `go.viam.com/rdk/components/*` or `go.viam.com/rdk/resource` outside of
+  arm/camera/vision/motion. For manipulation/vision/motion see
+  viam-go-motion-vision; CLI/modules/fleet see viam-modules-fleet; Python SDK
+  see viam-python; ML see viam-ml.
 ---
 
 # Viam Go Platform Skill

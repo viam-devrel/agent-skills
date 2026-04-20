@@ -2,20 +2,17 @@
 name: viam-python
 description: >
   Expert on the Viam Python SDK for building robotic applications, custom modules,
-  and ecosystem integrations. Use this skill whenever a developer asks about: Python
-  code importing `viam` packages, async robot client connections, Python module
-  development for Viam, component/service usage from Python (arm, base, camera,
-  sensor, motor, vision, motion, etc.), Viam image/NumPy/OpenCV conversions,
-  PyTorch/TensorFlow integration with Viam, protobuf type construction in Python
-  (Pose, PoseInFrame, WorldState, Vector3, GeoPoint), `EasyResource` mixin,
-  `Module.run_from_registry()`, or any pattern involving `asyncio.run(main())` with
-  `RobotClient.at_address()`. Also trigger when the user shares Python code that
-  imports from `viam.components`, `viam.services`, `viam.robot.client`,
-  `viam.module`, or `viam.proto` and wants help debugging, extending, or designing
-  around it. For other Viam topics see: viam-go-motion-vision (Go manipulation/vision),
-  viam-go-platform (non-manipulation Go components), viam-modules-fleet (CLI, modules,
-  fleet management), viam-ml (ML training/inference), viam-cpp (C++ SDK),
-  viam-typescript (TypeScript SDK).
+  and ecosystem integrations. Use whenever a developer asks about: code importing
+  `viam` packages (`viam.components`, `viam.services`, `viam.robot.client`,
+  `viam.module`, `viam.proto`), async robot client connections, Python module
+  development for Viam, component/service usage (arm, base, camera, sensor, motor,
+  vision, motion, etc.), Viam image/NumPy/OpenCV conversions, PyTorch/TensorFlow
+  integration, protobuf type construction (Pose, PoseInFrame, WorldState, Vector3,
+  GeoPoint), `EasyResource` mixin, `Module.run_from_registry()`, or any pattern
+  involving `asyncio.run(main())` with `RobotClient.at_address()`. For other Viam
+  topics see: viam-go-motion-vision (Go manipulation/vision), viam-go-platform
+  (non-manipulation Go), viam-modules-fleet (CLI/modules/fleet), viam-ml, viam-cpp,
+  viam-typescript.
 ---
 
 # Viam Python SDK Skill

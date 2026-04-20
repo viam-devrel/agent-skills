@@ -4,17 +4,12 @@ description: >
   Expert on Viam's ML pipeline: data capture, dataset management, custom training
   scripts, model deployment, and ML framework integration. Use this skill whenever a
   developer asks about: data capture configuration, data sync, datasets, training
-  scripts, model deployment, ML model service, TFLite, ONNX, PyTorch, TensorFlow,
-  Triton Server, Keras, Ultralytics, YOLO, mlmodel, `viam data`, `viam dataset`,
-  `viam train`, `viam ml-model`, model inference, tensor formats, labels.txt,
-  classification models, detection models, EfficientNet, RetinaNet, training job
+  scripts, model deployment, ML model service, `viam data`, `viam dataset`,
+  `viam train`, `viam ml-model`, model inference, tensor formats, training job
   submission, model export, or any question about training and deploying ML models on
   Viam robots. Also trigger when the user shares code that imports tensorflow, keras,
   ultralytics, or torch alongside Viam patterns, or when debugging model inference
-  issues with the vision service. For other Viam topics see: viam-modules-fleet (CLI
-  details, module lifecycle, fleet ops), viam-go-motion-vision (vision service
-  manipulation pipelines), viam-python (Python SDK patterns), viam-go-platform
-  (non-ML Go services).
+  issues with the vision service.
 ---
 
 # Viam ML Skill

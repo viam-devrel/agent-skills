@@ -1,18 +1,16 @@
 ---
 name: viam-modules-fleet
 description: >
-  Expert on the Viam CLI, module lifecycle, registry operations, fleet management, and robot
-  configuration. Use this skill whenever a developer asks about: `viam` CLI commands,
+  Expert on the Viam CLI, module lifecycle, registry operations, fleet management,
+  and robot configuration. Use whenever a developer asks about: `viam` CLI commands,
   `viam module generate`, `viam module build`, `viam module upload`, `viam module reload`,
-  meta.json configuration, module packaging, registry operations, robot configuration JSON,
-  component/service/module config patterns, fragment configs, fleet provisioning, machine
-  management, deployment workflows, data capture setup, API key management, or any
-  operational workflow involving the Viam platform. Also trigger when the user wants help
-  with: scaffolding a new module, deploying a module to a machine, updating a module version,
-  configuring resources on a robot, setting up data capture, or automating Viam operations
-  in CI/CD. For other Viam topics see: viam-go-motion-vision (Go manipulation/vision),
-  viam-go-platform (non-manipulation Go components), viam-python (Python SDK),
-  viam-cpp (C++ SDK), viam-typescript (TypeScript SDK), viam-ml (ML training/inference).
+  meta.json, module packaging, registry operations, robot configuration JSON,
+  component/service/module config patterns, fragment configs, fleet provisioning,
+  machine management, deployment workflows, data capture setup, API key management,
+  scaffolding/deploying/updating modules, configuring resources on a robot, or
+  automating Viam operations in CI/CD. For other Viam topics see: viam-go-motion-vision
+  (Go manipulation/vision), viam-go-platform (non-manipulation Go components),
+  viam-python, viam-cpp, viam-typescript, viam-ml.
 ---
 
 # Viam Modules & Fleet Skill
