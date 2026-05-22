@@ -5,7 +5,7 @@ description: >-
   from a local JSON file. Use when the user wants to set/replace what's on a
   Viam machine — e.g. "update the machine config", "deploy this cell config to
   machine X", "put these components on the machine". Works where the `viam` CLI
-  can't: it writes the config via the Viam app API. Pairs with viam-machine-up
+  can't: it writes the config via the Viam app API. Pairs with local-viam-server
   (create the machine + run viam-server). For `viam` CLI, module lifecycle, and
   config-schema topics see viam-modules-fleet.
 ---
@@ -76,6 +76,6 @@ modules/components/services count on success.
 
 | Topic | Skill |
 |-------|-------|
-| Create the machine and bring viam-server online in the first place | `viam-machine-up` |
+| Create the machine and bring viam-server online in the first place | `local-viam-server` |
 | `viam` CLI, module lifecycle, registry, robot-config schema reference | `viam-modules-fleet` |
 | Writing the modules referenced in the config you push | `viam-python`, `viam-go-platform`, `viam-go-motion-vision`, `viam-cpp` |

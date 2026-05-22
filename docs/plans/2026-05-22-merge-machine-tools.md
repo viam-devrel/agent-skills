@@ -12,13 +12,16 @@ the SDK skills instead of being symlinked in by hand.
 
 | From `viam-machine-claude-tools` | To `agent-skills` |
 |---|---|
-| `viam-machine-up/{SKILL.md, machine_up.py}` | `skills/viam-machine-up/` |
+| `viam-machine-up/{SKILL.md, machine_up.py}` | `skills/local-viam-server/` |
 | `viam-machine-config/{SKILL.md, update_config.py}` | `skills/viam-machine-config/` |
 
-The Python scripts (`machine_up.py`, `update_config.py`) were copied verbatim.
-Each `SKILL.md` gained a "Related skills" section cross-referencing the rest of
-the suite; the `viam-machine-up` / `viam-machine-config` descriptions gained a
-cross-reference tail in the house style.
+The `viam-machine-up` skill was renamed **`local-viam-server`** on the way in
+(directory, plugin, and `name:` frontmatter); its bundled script keeps the
+`machine_up.py` filename. The Python scripts (`machine_up.py`,
+`update_config.py`) were copied verbatim. Each `SKILL.md` gained a "Related
+skills" section cross-referencing the rest of the suite; the `local-viam-server`
+/ `viam-machine-config` descriptions gained a cross-reference tail in the house
+style.
 
 ## How they fit the marketplace
 
@@ -45,6 +48,6 @@ Marketplace metadata and the `viam-skills` bundle plugin bumped 0.1.0 → 0.2.0
   new skills. The other six skills' cross-reference lists were left unchanged —
   a C++ or TypeScript question does not route to a machine-tooling skill, and
   expanding every list risks the Claude Desktop description-length limit.
-- `viam-machine-up`'s generated `viam-server.json` configs hold machine
+- `local-viam-server`'s generated `viam-server.json` configs hold machine
   secrets; they are written outside the repo (`~/viam-local-machines/`) and a
   repo `.gitignore` was added as a backstop.

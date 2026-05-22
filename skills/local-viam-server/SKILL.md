@@ -1,5 +1,5 @@
 ---
-name: viam-machine-up
+name: local-viam-server
 description: >-
   Create a new Viam cloud machine (or reuse an existing one) and bring up a
   local viam-server connected to it. Use when the user wants to spin up a Viam
@@ -11,7 +11,7 @@ description: >-
   `viam` CLI, module lifecycle, and fleet topics see viam-modules-fleet.
 ---
 
-# viam-machine-up
+# local-viam-server
 
 Create a Viam cloud machine and run a local `viam-server` connected to it.
 

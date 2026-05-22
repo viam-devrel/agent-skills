@@ -1,5 +1,5 @@
 {
-  "name": "viam-machine-up",
+  "name": "local-viam-server",
   "version": "0.1.0",
   "description": "Viam machine tooling: create a cloud machine and run a local viam-server connected to it (handles the part secret the CLI hides).",
   "author": { "name": "Viam DevRel", "url": "https://github.com/viam-devrel" },

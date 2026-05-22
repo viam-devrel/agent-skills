@@ -28,7 +28,7 @@ Operational skills — each bundles an executable Python script for working with
 
 | Skill | Scope |
 |-------|-------|
-| [viam-machine-up](skills/viam-machine-up/) | Create a Viam cloud machine and bring up a local `viam-server` connected to it — fetches the machine part secret the `viam` CLI does not expose, and picks a free port |
+| [local-viam-server](skills/local-viam-server/) | Create a Viam cloud machine and bring up a local `viam-server` connected to it — fetches the machine part secret the `viam` CLI does not expose, and picks a free port |
 | [viam-machine-config](skills/viam-machine-config/) | Push or replace a machine's robot config (modules, components, services) via the Viam app API — the CLI can read config history but cannot set it |
 
 ## How Skills Work Together
@@ -49,16 +49,16 @@ The skills cross-reference each other rather than duplicating knowledge:
                      viam-python ──── viam-ml
                      (Python SDK)     (training, deployment)
 
-         viam-machine-up ──── viam-machine-config
-        (create machine,      (push robot config)
-         run viam-server)
-        └─── operate live machines (Viam app API) ───┘
+       local-viam-server ──── viam-machine-config
+      (create machine +       (push robot config)
+       run viam-server)
+      └──── operate live machines (Viam app API) ────┘
 ```
 
 - **Manipulation concepts** (frame system, motion planning, WorldState) live in `viam-go-motion-vision` — language skills reference it for architecture
 - **Module lifecycle** (scaffold, build, upload, deploy) lives in `viam-modules-fleet` — all language skills reference it for deployment
 - **ML pipeline** (data capture, training, model deployment) lives in `viam-ml` — referenced by vision and language skills
-- **Machine operations** (create a machine, run `viam-server`, push a robot config) live in `viam-machine-up` and `viam-machine-config` — they drive live machines via the Viam app API, complementing the build/upload workflows in `viam-modules-fleet`
+- **Machine operations** (create a machine, run `viam-server`, push a robot config) live in `local-viam-server` and `viam-machine-config` — they drive live machines via the Viam app API, complementing the build/upload workflows in `viam-modules-fleet`
 
 ## Installation
 
@@ -98,7 +98,7 @@ You'll see the `viam-agent-skills` marketplace with these plugins:
 | `viam-ml` | Data capture, training, model deployment |
 | `viam-cpp` | C++ SDK driver patterns |
 | `viam-typescript` | Browser robot control, HMIs, Viam Applications |
-| `viam-machine-up` | Create a cloud machine + run a local viam-server |
+| `local-viam-server` | Create a cloud machine + run a local viam-server |
 | `viam-machine-config` | Push a machine's robot config via the app API |
 
 ### 3. Install directly (non-interactive)
@@ -107,7 +107,7 @@ You'll see the `viam-agent-skills` marketplace with these plugins:
 /plugin install viam-skills@viam-agent-skills
 /plugin install viam-python@viam-agent-skills
 /plugin install viam-cpp@viam-agent-skills
-/plugin install viam-machine-up@viam-agent-skills
+/plugin install local-viam-server@viam-agent-skills
 ```
 
 The `@viam-agent-skills` suffix selects this marketplace.
@@ -154,9 +154,9 @@ skills/viam-<name>/
 **Machine tooling skills** pair a `SKILL.md` with an executable script:
 
 ```
-skills/viam-machine-<name>/
+skills/<skill-name>/
   SKILL.md                          # When to use the skill, usage, options, gotchas
-  <name>.py                         # The script the skill drives (run via python3)
+  <script>.py                       # The script the skill drives (run via python3)
 ```
 
 ### SKILL.md contains:

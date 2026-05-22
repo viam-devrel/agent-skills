@@ -67,8 +67,8 @@
       "tags": ["viam", "typescript", "web"]
     },
     {
-      "name": "viam-machine-up",
-      "source": "./plugins/viam-machine-up",
+      "name": "local-viam-server",
+      "source": "./plugins/local-viam-server",
       "description": "Create a Viam cloud machine and run a local viam-server connected to it.",
       "category": "robotics",
       "tags": ["viam", "machine", "viam-server", "cli"]
