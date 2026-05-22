@@ -1,0 +1,7 @@
+# Python bytecode from the bundled tooling scripts
+__pycache__/
+*.pyc
+
+# Generated viam-server configs hold machine secrets — never commit them.
+viam-server.json
+*.viam-server.json

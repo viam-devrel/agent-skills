@@ -10,7 +10,7 @@ description: >
   scaffolding/deploying/updating modules, configuring resources on a robot, or
   automating Viam operations in CI/CD. For other Viam topics see: viam-go-motion-vision
   (Go manipulation/vision), viam-go-platform (non-manipulation Go components),
-  viam-python, viam-cpp, viam-typescript, viam-ml.
+  viam-python, viam-cpp, viam-typescript, viam-ml, local-viam-server, viam-machine-config.
 ---
 
 # Viam Modules & Fleet Skill
@@ -70,6 +70,10 @@ Do not use this skill for:
 - **Manipulation / vision internals** -- motion planning, frame systems, IK, point clouds
   belong to `viam-go-motion-vision`
 - **Hardware driver issues** -- motor tuning, serial/CAN, firmware
+- **Operating a live machine** -- *creating* a machine and running `viam-server` against it,
+  or *pushing* a robot config the `viam` CLI cannot set, belong to `local-viam-server` and
+  `viam-machine-config`. This skill owns the config *schema* and CLI; those skills script
+  the Viam app API actions the CLI does not expose.
 
 If a question falls outside these bounds, say so and point to the correct skill.
 
@@ -79,6 +83,8 @@ If a question falls outside these bounds, say so and point to the correct skill.
 - "How do I deploy my Go module?" -- This skill handles it entirely (build, package, upload, deploy).
 - "How do I train a model on my captured data?" -- Start here for data capture setup, then
   hand off to `viam-ml` for training.
+- "Spin up a viam-server for a new machine" / "set this config on my machine" -- hand off to
+  `local-viam-server` / `viam-machine-config`, which drive the Viam app API directly.
 
 ---
 
