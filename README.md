@@ -62,7 +62,7 @@ The skills cross-reference each other rather than duplicating knowledge:
 
 ## Installation
 
-This repo is published as a **Claude Code plugin marketplace**. You can install the full bundle in one go, or pick individual SDK plugins.
+This repo is published as a **Claude Code plugin marketplace**. You can install the full bundle in one go, or pick individual plugins.
 
 ### 1. Add the marketplace
 
@@ -128,13 +128,13 @@ Once installed, skills activate automatically based on triggers in their frontma
 ```
 .claude-plugin/
   plugin.json          # bundled "viam-skills" plugin manifest
-  marketplace.json     # marketplace listing (bundle + per-SDK)
+  marketplace.json     # marketplace listing (bundle + per-skill)
 skills/                # canonical skill sources
-  viam-*/
+  <skill>/
 plugins/               # per-skill plugin wrappers (symlink into skills/)
-  viam-*/
+  <skill>/
     .claude-plugin/plugin.json
-    skills/viam-*  -> ../../../skills/viam-*
+    skills/<skill>  -> ../../../skills/<skill>
 ```
 
 The per-skill plugins are thin wrappers that symlink into `skills/` — there is only one source of truth for each skill.
@@ -159,7 +159,7 @@ skills/<skill-name>/
   <script>.py                       # The script the skill drives (run via python3)
 ```
 
-### SKILL.md contains:
+### An SDK skill's SKILL.md contains:
 
 - **Frontmatter** — trigger description (when the skill activates)
 - **Knowledge Sources** — which reference files to consult, with version awareness caveats
@@ -175,7 +175,7 @@ Source-verified interface definitions, method signatures, type systems, architec
 
 ## Source Material
 
-Skills were built from analysis of these repositories:
+The SDK & pipeline skills were built from analysis of these repositories:
 
 | Source | Used by |
 |--------|---------|
@@ -197,7 +197,7 @@ Skills were built from analysis of these repositories:
 
 ## Version Awareness
 
-These skills were built from source analysis circa April 2026. The Viam platform evolves rapidly. Each skill includes version awareness guidance instructing the LLM to:
+The SDK & pipeline skills were built from source analysis circa April 2026. The Viam platform evolves rapidly. Each of those skills includes version awareness guidance instructing the LLM to:
 
 - Check the user's `go.mod` / `requirements.txt` / `package.json` for their SDK version
 - Prefer grepping local source over trusting the reference blindly
