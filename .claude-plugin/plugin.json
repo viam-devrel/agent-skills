@@ -1,7 +1,7 @@
 {
   "name": "viam-skills",
   "version": "0.2.0",
-  "description": "Full Viam SDK skill suite: Go (motion/vision + platform), Python, C++, TypeScript, ML pipeline, CLI/module/fleet tooling, and machine tooling (create machines, run viam-server, push robot configs).",
+  "description": "Full Viam SDK skill suite: Go (motion/vision + platform), Python, C++, TypeScript, ML pipeline, CLI/module/fleet tooling, machine tooling (create machines, run viam-server, push robot configs), and docs authoring/review.",
   "author": {
     "name": "Viam DevRel",
     "url": "https://github.com/viam-devrel"

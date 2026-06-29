@@ -1,0 +1,10 @@
+{
+  "name": "viam-doc-review",
+  "version": "0.1.0",
+  "description": "Review Viam docs pages against house style before they reach a PR: personified services, learning-objective leaks, negation-heavy framing, undefined jargon, imprecise API references, and prose that fails the suggestion-level vale rules.",
+  "author": { "name": "Viam DevRel", "url": "https://github.com/viam-devrel" },
+  "homepage": "https://github.com/viam-devrel/agent-skills",
+  "repository": "https://github.com/viam-devrel/agent-skills",
+  "license": "Apache-2.0",
+  "keywords": ["viam", "docs", "review", "writing", "style"]
+}

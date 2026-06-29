@@ -90,7 +90,7 @@ You'll see the `viam-agent-skills` marketplace with these plugins:
 
 | Plugin | What it installs |
 |--------|------------------|
-| `viam-skills` | **Bundled** — all 9 skills below |
+| `viam-skills` | **Bundled** — all 11 skills below |
 | `viam-go-motion-vision` | Arm, camera, vision, motion planning (Go) |
 | `viam-go-platform` | Non-manipulation Go components, services, resource API |
 | `viam-modules-fleet` | Viam CLI, module lifecycle, fleet/robot config |
@@ -100,6 +100,8 @@ You'll see the `viam-agent-skills` marketplace with these plugins:
 | `viam-typescript` | Browser robot control, HMIs, Viam Applications |
 | `local-viam-server` | Create a cloud machine + run a local viam-server |
 | `viam-machine-config` | Push a machine's robot config via the app API |
+| `viam-doc-draft` | Draft Viam docs pages from learning objectives (Diátaxis, house style) |
+| `viam-doc-review` | Review Viam docs pages against house style before a PR |
 
 ### 3. Install directly (non-interactive)
 

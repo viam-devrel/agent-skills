@@ -12,7 +12,7 @@
     {
       "name": "viam-skills",
       "source": "./",
-      "description": "Full Viam skill suite — all 9 skills: SDKs, ML, fleet/module tooling, and machine tooling.",
+      "description": "Full Viam skill suite — all 11 skills: SDKs, ML, fleet/module tooling, machine tooling, and docs authoring/review.",
       "category": "robotics",
       "tags": ["viam", "bundle", "all-sdks"],
       "strict": false
@@ -79,6 +79,20 @@
       "description": "Push or replace a Viam machine's robot config via the Viam app API.",
       "category": "robotics",
       "tags": ["viam", "machine", "config", "fleet"]
+    },
+    {
+      "name": "viam-doc-draft",
+      "source": "./plugins/viam-doc-draft",
+      "description": "Draft Viam docs pages from learning objectives: Diataxis, concrete-first openings, house style.",
+      "category": "documentation",
+      "tags": ["viam", "docs", "drafting", "writing"]
+    },
+    {
+      "name": "viam-doc-review",
+      "source": "./plugins/viam-doc-review",
+      "description": "Review Viam docs pages against house style before they reach a PR.",
+      "category": "documentation",
+      "tags": ["viam", "docs", "review", "writing"]
     }
   ]
 }

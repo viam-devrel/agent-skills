@@ -1,0 +1,10 @@
+{
+  "name": "viam-doc-draft",
+  "version": "0.1.0",
+  "description": "Turn learning objectives plus source links into a Viam docs page: Diataxis classification, concrete-first openings, positive role-assignment, API precision, vocabulary discipline, and a prose-level vale gate.",
+  "author": { "name": "Viam DevRel", "url": "https://github.com/viam-devrel" },
+  "homepage": "https://github.com/viam-devrel/agent-skills",
+  "repository": "https://github.com/viam-devrel/agent-skills",
+  "license": "Apache-2.0",
+  "keywords": ["viam", "docs", "drafting", "writing", "diataxis"]
+}
