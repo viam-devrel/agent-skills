@@ -134,6 +134,26 @@ and `M_TO_MM`. Both parsers and `fk.py` import from it. This exists because `sva
 `rpy_to_matrix` for `euler_angles`, and importing it from `urdf.py` would violate the
 boundary above.
 
+**`transforms.py` is backed by `viam.spatialmath`** (task A4b). That module is a ctypes
+binding to `libviam_rust_utils` — the same native library behind RDK — so its conversions
+are canonical rather than a Python reimplementation. This matters most for A5, whose five
+orientation types include Viam's own orientation-vector format.
+
+> **Layout trap — `RotationMatrix.elements` is COLUMN-major.** The class docstring says
+> `elements[3*row + col]` (row-major), and that is wrong: the buffer is nalgebra's, which
+> is column-major. Measured against the verified `rpy_to_matrix(0.1, 0.2, 0.3)`:
+>
+> | interpretation | max abs diff |
+> |---|---|
+> | `np.array(elements).reshape(3, 3)` | **0.565** |
+> | `np.array(elements).reshape(3, 3, order="F")` | **1.1e-16** |
+>
+> Read as documented you get the transpose — for a rotation matrix, its inverse — which
+> silently inverts every rotation with no exception raised. Quaternion comparisons do not
+> expose this, because quaternions carry no layout. **Pin the layout with a dedicated
+> test** so a future SDK change that "fixes" the buffer order fails loudly instead of
+> silently inverting poses.
+
 ## Error-handling contract
 
 **This applies to every parser and every CLI subcommand. It was missing from the first
