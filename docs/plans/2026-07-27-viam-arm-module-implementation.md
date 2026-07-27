@@ -1600,6 +1600,17 @@ Depends on A and B.
 **Files:**
 - Create: `skills/viam-arm-module/SKILL.md`
 
+**Document the multi-arm case** — the one place armkit's output is correct and still
+surprising. `mybuddy.urdf` (a dual-arm robot) reports `13 actuated joints, base base ->
+tip link1`. That is right: a declared tip legitimately counts branch joints toward DoF, as
+established in A3b. But a reader can easily misread 13 DoF at a torso link as a bug. Say
+in `SKILL.md` that when a model contains multiple *arms* rather than an arm plus a tool,
+validate each arm's chain separately rather than declaring a common tip.
+
+**State the platform requirements**, including that Windows ARM64 is unsupported and fails
+during dependency resolution *before Python runs*, so armkit cannot catch or explain it.
+Supported: Linux glibc/musl on x86_64/aarch64/armv7, macOS x86_64/arm64, Windows x64.
+
 - [ ] **Step 1: Write frontmatter.** `name: viam-arm-module`. The `description` must trigger on arm-module authoring without stealing from `viam-go-motion-vision` (motion planning, frame system) or `viam-cpp`. Trigger on: building/porting an arm driver, kinematics files, URDF/SVA, `Get3DModels`, arm module scaffolding. Study the sibling skills' descriptions first; keep within Claude Desktop's length limit — commit `0c6254d` shortened descriptions for exactly this reason.
 - [ ] **Step 2: Write the phase machine** — seven phases, each with artifact, gate, and exact gate command. Gates are skippable with evidence, not by assertion.
 - [ ] **Step 3: Write the Phase 0 triage decision tree** — three on-ramps, and the FK ladder with its four rungs.
