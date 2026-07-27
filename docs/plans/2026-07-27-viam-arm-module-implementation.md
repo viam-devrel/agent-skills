@@ -95,6 +95,15 @@ Rules:
    reports PASS is worse than one that fails loudly.
 4. **CLI subcommands catch `ValueError` only**, and convert it to an error finding with
    exit 1. If a subcommand needs a broader catch, the parser is not holding up its end.
+5. **Every `pytest.raises(ValueError)` MUST supply a `match=` argument.** This convention is
+   load-bearing, not style. Because the parsers convert internal bugs into the same
+   exception type as user-input errors, a bare `pytest.raises(ValueError)` will pass when
+   the parser crashes on its own bug — a green test proving nothing. Verified during A3
+   review: an injected internal `AttributeError` surfaces as
+   `ValueError: <path>: failed to parse URDF (AttributeError: ...)`, indistinguishable
+   from a real finding without a `match=`. The catch-all is otherwise well-sized — it
+   preserves `__cause__` via `from e`, names the original type in the message, and leaves
+   `KeyboardInterrupt`/`SystemExit` alone, since those derive from `BaseException`.
 
 ## Conventions
 
