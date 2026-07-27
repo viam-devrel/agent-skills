@@ -34,9 +34,7 @@ guarantee RDK will load the file.**
 from __future__ import annotations
 
 import argparse
-import ast
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -49,6 +47,7 @@ from _armkit.checks import (
     check_unit_scale,
 )
 from _armkit.fk import forward_kinematics
+from _armkit.model import KinematicModel
 from _armkit.transforms import matrix_to_wxyz_quaternion
 from _armkit.urdf import parse_urdf
 
@@ -57,7 +56,7 @@ from _armkit.urdf import parse_urdf
 # _require_resolvable_tip -- see test_parity.py). Matched here only to
 # decide whether to attach a --tip remedy; the message text itself is never
 # altered, so parity with RDK's diagnosis stays intact.
-_MULTI_LEAF_RE = re.compile(r"need exactly one end effector, have (\[.*\])$")
+_MULTI_LEAF_MARKER = "need exactly one end effector, have "
 
 RDK_DIVERGENCE_NOTE = (
     "An armkit PASS does not guarantee RDK will load this file: RDK hard-fails on an "
@@ -97,33 +96,90 @@ def _usage_error(message: str) -> None:
     sys.exit(2)
 
 
-def _structure_finding(message: str) -> Finding:
+def _first_fork_link(model: KinematicModel) -> str | None:
+    """The first link, walking from the root, with more than one child
+    joint -- or None if the tree never forks (shouldn't happen when this is
+    only called for the multi-leaf case) or the fork is the root itself
+    (which cannot be used as --tip; see below).
+
+    This is what `_structure_finding` suggests instead of a leaf: armkit
+    cannot know which of several leaves is an arm's intended end effector
+    (a gripper finger, one arm of a dual-arm robot, a camera flange, a pump
+    -- the real corpus has all four), but it CAN compute where the chain
+    stops being unambiguous, which is useful regardless of which leaf turns
+    out to be the right one -- for a gripper, that's the tool flange itself.
+
+    Uses model.bfs_joints() (whole-tree order), not chain() -- chain()
+    requires an already-resolved tip, which is exactly what doesn't exist
+    yet here. bfs_joints() only validates roots/cycles/disconnection, which
+    already succeeded by the time this is called (chain() checks those
+    first, via the same method, before ever reaching the multi-leaf error).
+
+    Skips a fork at the ROOT link deliberately: `--tip <root>` would itself
+    raise ("declared tip ... is not reachable from the root") since a root
+    is by definition never any joint's child -- suggesting it would hand
+    back a remedy that fails when followed. Measured across the fixtures
+    this fix was built against: none forked at the root (every one has a
+    single trunk joint before any branching), but the guard costs nothing
+    and a suggestion that doesn't work is worse than none.
+    """
+    try:
+        order = model.bfs_joints()
+    except ValueError:
+        return None
+    children_links = {j.child for j in order}
+    counts: dict[str, int] = {}
+    for j in order:
+        counts[j.parent] = counts.get(j.parent, 0) + 1
+    seen: set[str] = set()
+    for j in order:
+        if j.parent in seen:
+            continue
+        seen.add(j.parent)
+        if counts[j.parent] > 1 and j.parent in children_links:
+            return j.parent
+    return None
+
+
+def _structure_finding(model: KinematicModel, message: str) -> Finding:
     """Build the `structure` finding for a chain()/dof failure.
 
     RDK's own wording is kept byte-for-byte in `message` -- test_parity.py
     pins it for parity, and armkit being MORE useful than RDK is the point
     of armkit existing, not a reason to paraphrase RDK's diagnosis. A remedy
-    is attached as a SEPARATE field, only for the multi-leaf case: 30 of 84
-    real vendor URDFs surveyed branch (a gripper shipping attached to the
-    arm is the common cause), and that failure is fixable with --tip, using
-    a leaf armkit already has in hand from the error message itself. A
-    cycle, disconnection, or multiple-roots failure gets no remedy here --
-    declaring a tip does not give the model a coherent tree to walk, so
-    suggesting --tip for those would send a user down a dead end of its own.
+    is attached as a SEPARATE field, only for the multi-leaf case -- a
+    cycle, disconnection, or multiple-roots failure gets no remedy here,
+    since declaring a tip does not give the model a coherent tree to walk.
+
+    The remedy names the FORK POINT (_first_fork_link), not a leaf.
+    Measured during review: suggesting the alphabetically-first leaf
+    (an earlier version of this fix) named a gripper finger on a real
+    mycobot file and one arm of a dual-arm robot on another -- a developer
+    who copies that suggestion gets forward kinematics to the wrong frame,
+    with no error, which is worse than the dead end this fix started from.
+    armkit genuinely does not know why a model branches or which leaf is
+    the intended end effector -- the real corpus has grippers, dual-arm
+    robots, camera flanges, and pumps all branching this way -- so the
+    wording below makes no claim about which, or why.
     """
-    match = _MULTI_LEAF_RE.search(message)
-    if match is None:
+    if _MULTI_LEAF_MARKER not in message:
         return Finding("error", "structure", message)
-    try:
-        leaves = ast.literal_eval(match.group(1))
-    except (ValueError, SyntaxError):
-        leaves = []
-    suggestion = leaves[0] if leaves else "<link>"
-    remedy = (
-        "-> this model branches (common when a gripper ships attached to the arm).\n"
-        "   Re-run with --tip <link> to declare the end effector, e.g.\n"
-        f"   --tip {suggestion}"
-    )
+
+    fork = _first_fork_link(model)
+    if fork is not None:
+        remedy = (
+            "-> this model has more than one end-effector candidate, so armkit cannot\n"
+            "   tell which is your arm's output frame. The chain first branches at\n"
+            f"   {fork!r} -- if that is your arm's tool flange, use --tip {fork};\n"
+            "   otherwise pick one of the links listed above.\n"
+            "   Re-run with --tip <link>."
+        )
+    else:
+        remedy = (
+            "-> this model has more than one end-effector candidate, so armkit cannot\n"
+            "   tell which is your arm's output frame.\n"
+            "   Re-run with --tip <link>, picking one of the links listed above."
+        )
     return Finding("error", "structure", message, remedy=remedy)
 
 
@@ -209,7 +265,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     try:
         chain = model.chain()
     except ValueError as e:
-        return _report(path, None, [_structure_finding(str(e))], args)
+        return _report(path, None, [_structure_finding(model, str(e))], args)
 
     base = chain[0].parent
     tip = chain[-1].child

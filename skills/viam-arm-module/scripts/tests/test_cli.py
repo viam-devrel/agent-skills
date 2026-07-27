@@ -134,19 +134,87 @@ def test_validate_structure_finding_is_reported_once(fixtures):
 # failures (cycle, disconnection, multiple roots) do not.
 # ---------------------------------------------------------------------------
 
-def test_validate_multi_leaf_structure_finding_suggests_tip(fixtures):
+def test_validate_multi_leaf_structure_finding_names_the_fork_point(fixtures):
     # This is the single most common real-world failure: 30/84 real vendor
     # URDFs branch because a gripper ships attached to the arm. RDK's own
     # wording ("need exactly one end effector, have [...]") is kept
     # verbatim for parity, but nothing in it mentions the fix -- a user's
     # only realistic next move without a remedy is to read armkit's source.
+    #
+    # The remedy names the FORK LINK -- two_leaf.urdf's tree first branches
+    # at "palm" (base -j0-> palm -jl/jr-> finger_l/finger_r) -- not a
+    # guessed leaf. An earlier version of this fix suggested `leaves[0]`
+    # (alphabetically first), which on real multi-fingered/dual-arm files
+    # names a finger or one arm of a dual-arm robot: plausible-looking,
+    # silently wrong forward kinematics. armkit cannot know which leaf is
+    # the intended end effector, so it must not imply that it does.
     r = run("validate", str(fixtures / "two_leaf.urdf"))
     assert r.returncode == 1
     assert "need exactly one end effector, have ['finger_l', 'finger_r']" in r.stdout
     assert "--tip" in r.stdout
-    # armkit has the leaf list in hand and should suggest a concrete one,
-    # not just name the flag.
-    assert "--tip finger_l" in r.stdout
+    assert "'palm'" in r.stdout
+    assert "--tip palm" in r.stdout
+    # Must NOT claim to know *why* it branches -- the real corpus also has
+    # camera-flange and pump branches, not just grippers.
+    assert "gripper" not in r.stdout.lower()
+
+
+def test_validate_multi_leaf_remedy_does_not_name_a_leaf_on_four_leaf_gripper(tmp_path):
+    # Regression guard for the exact failure the fix above closes. Measured
+    # on real files during review: a real mycobot gripper URDF has leaves
+    # ['gripper_left1', 'gripper_left2', 'gripper_right1', 'gripper_right2']
+    # and the OLD (leaves[0]) remedy suggested "--tip gripper_left1" -- a
+    # finger, not the tool flange. This fixture reproduces that shape:
+    # base -> arm -> palm, palm forks into two 2-segment fingers (4 leaves,
+    # alphabetically first is a finger), so a regression back to
+    # leaves[0]-as-suggestion would suggest "gripper_left1" here too.
+    path = write_urdf(tmp_path, """
+    <robot name="gripper_shape">
+      <link name="base"/><link name="arm"/><link name="palm"/>
+      <link name="gripper_left1"/><link name="gripper_left2"/>
+      <link name="gripper_right1"/><link name="gripper_right2"/>
+      <joint name="j_arm" type="revolute">
+        <parent link="base"/><child link="arm"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j_palm" type="revolute">
+        <parent link="arm"/><child link="palm"/>
+        <origin xyz="0.1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j_left1" type="revolute">
+        <parent link="palm"/><child link="gripper_left1"/>
+        <origin xyz="0 0.05 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j_left2" type="revolute">
+        <parent link="palm"/><child link="gripper_left2"/>
+        <origin xyz="0 0.06 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j_right1" type="revolute">
+        <parent link="palm"/><child link="gripper_right1"/>
+        <origin xyz="0 -0.05 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j_right2" type="revolute">
+        <parent link="palm"/><child link="gripper_right2"/>
+        <origin xyz="0 -0.06 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    r = run("validate", str(path))
+    assert r.returncode == 1
+    assert "need exactly one end effector, have " in r.stdout
+    assert "gripper_left1" in r.stdout and "gripper_right2" in r.stdout  # RDK's own leaf list
+    assert "--tip gripper_left1" not in r.stdout
+    assert "--tip gripper_left2" not in r.stdout
+    assert "--tip gripper_right1" not in r.stdout
+    assert "--tip gripper_right2" not in r.stdout
+    # The fork is at "palm" -- one level up from the fingers.
+    assert "--tip palm" in r.stdout
 
 
 def test_validate_cycle_structure_finding_has_no_tip_remedy(tmp_path):
