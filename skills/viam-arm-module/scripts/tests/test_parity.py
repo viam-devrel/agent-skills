@@ -80,19 +80,95 @@ def test_declared_tip_case(fixtures):
     assert [j.name for j in m.chain()] == ["j0", "jl"]
 
 
-def test_mesh_divergence_is_deliberate(fixtures):
-    # DELIBERATE, RECORDED DIVERGENCE from RDK, not drift:
-    # RDK loads mesh files during parse and hard-fails when they're
-    # missing. Probe (RDK v1.0.0), 2026-07-27:
-    #   REJECT  meshed.urdf  failed to build mesh map: failed to load
-    #           mesh file .../fixtures/meshes/link1.stl (referenced as
-    #           meshes/link1.stl): open .../meshes/link1.stl: no such
-    #           file or directory
-    # (Both mycobot gripper URDFs in the wider corpus reject the same
-    # way, for the same reason.) armkit does NOT resolve/require mesh
-    # files at parse time -- unresolved meshes are meant to surface as a
-    # validator finding (a later task), not an ACCEPT/REJECT parse
-    # failure, because a validator's job is to report what's wrong with
-    # a file, not refuse to look at it. So armkit accepts this file today.
+def test_mimic_of_mimic_matches_rdk(fixtures):
+    # Probe (RDK v1.0.0), 2026-07-27:
+    #   ACCEPT  mimic_of_mimic.urdf  DoF=1
+    # RDK ACCEPTS a mimic-of-a-mimic and composes the multiplier/offset
+    # transitively rather than rejecting the chain. j2 mimics q1
+    # (multiplier=2.0, offset=0.1); j3 mimics j2 (multiplier=3.0,
+    # offset=0.2) -- composed, j3 = 6.0*q1 + 0.5.
+    #
+    # This composed value was cross-checked against an actual RDK pose,
+    # not just arithmetic: feeding q1=0.3 through this file and feeding
+    # [0.3, 0.7, 2.3] (the hand-expanded non-mimic equivalent: q1=0.3,
+    # j2=2*0.3+0.1=0.7, j3=6*0.3+0.5=2.3) through an otherwise-identical
+    # 3-independent-joint URDF produced IDENTICAL poses on RDK v1.0.0 via
+    # the probe's `--at` pose mode (point_mm=[0 0 300],
+    # quat=[-0.079120889 0 0 0.996865028] for both). Composing with the
+    # multiplier updated before the offset (the wrong order) instead
+    # gives j3=2.6 and a visibly different pose on the same probe run --
+    # confirming RDK really does update offset using the OLD multiplier
+    # (model_json.go:194-208), not a coincidence of the arithmetic.
+    verdict, dof = _verdict(fixtures, "mimic_of_mimic.urdf")
+    assert verdict == "ACCEPT"
+    assert dof == 1
+    m = parse_urdf(fixtures / "mimic_of_mimic.urdf")
+    j3 = next(j for j in m.chain() if j.name == "j3")
+    assert (j3.mimic.source, j3.mimic.multiplier, j3.mimic.offset) == ("q1", 6.0, 0.5)
+
+
+def test_mimic_cycle_matches_rdk(fixtures):
+    # Probe (RDK v1.0.0), 2026-07-27:
+    #   REJECT  mimic_cycle.urdf  circular mimic joint reference detected: joint "j2"
+    # j2 mimics j3, j3 mimics j2 -- value derivation would never
+    # terminate. Fixed alongside the leaf-based topology work: a mimic
+    # cycle is the same failure mode as chain()'s cycle guard, one layer
+    # up, and previously slipped through unchecked (armkit used to
+    # ACCEPT this with dof=1).
+    verdict, msg = _verdict(fixtures, "mimic_cycle.urdf")
+    assert verdict == "REJECT"
+    assert 'circular mimic joint reference detected: joint "j2"' in msg
+
+
+def test_mimic_of_fixed_matches_rdk(fixtures):
+    # Probe (RDK v1.0.0), 2026-07-27:
+    #   REJECT  mimic_of_fixed.urdf  mimic joint references non-existent
+    #           source joint: joint "j3" references source "j2" which
+    #           has no DoF
+    # j3 mimics j2, a fixed joint -- there's no position to derive a
+    # value from. Previously slipped through unchecked (armkit used to
+    # ACCEPT this with dof=1).
+    verdict, msg = _verdict(fixtures, "mimic_of_fixed.urdf")
+    assert verdict == "REJECT"
+    assert (
+        'mimic joint references non-existent source joint: '
+        'joint "j3" references source "j2" which has no DoF'
+    ) in msg
+
+
+def test_mesh_and_origin_divergences_are_deliberate(fixtures):
+    # TWO deliberate, RECORDED divergences from RDK, not drift -- both
+    # share the same consequence, stated explicitly: an armkit PASS does
+    # NOT imply RDK will load this file.
+    #
+    # 1. RDK loads mesh files during parse and hard-fails when they're
+    #    missing. Probe (RDK v1.0.0), 2026-07-27:
+    #      REJECT  meshed.urdf  failed to build mesh map: failed to load
+    #              mesh file .../fixtures/meshes/link1.stl (referenced as
+    #              meshes/link1.stl): open .../meshes/link1.stl: no such
+    #              file or directory
+    #    (Both mycobot gripper URDFs in the wider corpus reject the same
+    #    way, for the same reason.) armkit does NOT resolve/require mesh
+    #    files at parse time -- unresolved meshes are meant to surface as
+    #    a validator finding (a later task), not an ACCEPT/REJECT parse
+    #    failure, because a validator's job is to report what's wrong
+    #    with a file, not refuse to look at it.
+    #
+    # 2. A joint with no <origin> at all makes RDK PANIC (SIGSEGV, nil
+    #    pointer dereference indexing an empty childRPY slice) at
+    #    model_urdf.go:196, rather than return an error -- verified via
+    #    the probe (RDK v1.0.0, 2026-07-27; see no_origin.urdf below).
+    #    armkit accepts this: the URDF spec defaults <origin> to
+    #    identity, and armkit implements that default (_origin() in
+    #    urdf.py). 14 of the 159 corpus files (the Dobot CR/Nova family's
+    #    "dummy_joint", plus 2 mycobot files) have a joint missing
+    #    <origin> -- but every one of them ALSO references a missing
+    #    mesh, so RDK's mesh check (divergence #1, which runs first)
+    #    fails before the panic path is ever reached; the panic stays
+    #    latent in the corpus today, not exercised, but it is real and it
+    #    belongs on the record.
     m = parse_urdf(fixtures / "meshed.urdf")
+    assert m.dof == 1
+
+    m = parse_urdf(fixtures / "no_origin.urdf")
     assert m.dof == 1
