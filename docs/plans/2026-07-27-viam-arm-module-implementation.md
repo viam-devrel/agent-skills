@@ -1131,6 +1131,22 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 | `missing-limits` | error | actuated, non-`continuous` joint whose `lower`/`upper` are `None` |
 | `structure` | error | `chain()` raised — branching, cycle, multiple roots, or disconnection |
 | `parse` | error | the parser raised `ValueError` — surface its message verbatim |
+| `input-out-of-bounds` | error | a `--at` value falls outside its joint's declared limits |
+
+**`input-out-of-bounds` closes a divergence found during A4 review.** RDK's `Transform()`
+validates inputs against joint limits and errors; armkit's `fk.py` does no limit checking
+at all. Measured on `two_link.urdf` (limits ±3.14159):
+
+| input | RDK | armkit |
+|---|---|---|
+| `[0, math.pi]` — 2.65e-6 over | REJECT `input out of bounds` | `[2000, 0, 0]` |
+| `[0, 100.0]` — ~16 revolutions | REJECT | `[2000, 0, 0]` |
+| `[1e6, 0]` | REJECT | `[1936.75, -350.00, 0]` |
+
+Every model with finite limits is affected. Without this check, `armkit validate --at`
+reports success on configurations RDK refuses to evaluate. `continuous` joints carry
+`±inf` limits and must pass any value. Recorded in `test_parity.py` during A4; enforcement
+belongs here rather than in `fk.py`, whose scope is computing poses.
 
 **`nonunit-axis` was removed.** It was defined as "axis that is not unit length after
 normalization attempt," which can never fire — `parse_urdf` always normalizes, so the
