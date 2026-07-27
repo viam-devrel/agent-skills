@@ -11,6 +11,7 @@ Conversion from URDF (meters) or SVA (degrees) happens at parse time.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -124,7 +125,7 @@ class KinematicModel:
             raise ValueError("disconnected joints in kinematic model")
         return order
 
-    def _resolve_tip(self) -> str:
+    def _require_resolvable_tip(self) -> str:
         """Pick (or validate) the model's end-effector link.
 
         - a declared tip (primary_output_frame) is used as-is; branching
@@ -167,7 +168,12 @@ class KinematicModel:
         # tree and still contribute a transform, they just don't consume
         # an input slot -- RDK derives their value at runtime instead.
         order = self._bfs_all_joints()
-        self._resolve_tip()  # raise if the tip is ambiguous -- see _resolve_tip
+        # Calling this purely for its raise-if-ambiguous side effect (the
+        # name says so, so this isn't a discardable-looking no-op): RDK
+        # never produces a Model at all for a tree with an unresolved
+        # tip, so this model isn't valid to query -- even for just dof --
+        # until a tip resolves. See _require_resolvable_tip's docstring.
+        self._require_resolvable_tip()
         return [j for j in order if j.actuated and j.mimic is None]
 
     @property
@@ -179,10 +185,10 @@ class KinematicModel:
 
         Raises on missing/multiple roots, cycles, or disconnection
         (via _bfs_all_joints -- see there for why those checks moved),
-        or on an ambiguous/unreachable tip (via _resolve_tip).
+        or on an ambiguous/unreachable tip (via _require_resolvable_tip).
         """
         self._bfs_all_joints()  # validate roots/cycles/disconnection first
-        tip = self._resolve_tip()
+        tip = self._require_resolvable_tip()
 
         child_to_joint = {j.child: j for j in self.joints}
         ordered_rev: list[Joint] = []
@@ -203,3 +209,36 @@ class KinematicModel:
     @property
     def tip_link(self) -> str:
         return self.chain()[-1].child
+
+    def joint_values(self, inputs: Sequence[float]) -> dict[str, float]:
+        """Flat BFS-ordered input vector -> value per joint name, mimics derived.
+
+        `inputs` must line up with actuated_joints (Part 4: BFS over the
+        WHOLE tree, not just chain()'s tip path), one value per non-mimic
+        actuated joint. Mimic joints are filled in here from the already-
+        composed (source, multiplier, offset) that parsing resolved
+        transitively -- source always names a real actuated joint, never
+        another mimic, however many hops the original URDF <mimic> chain
+        had (see urdf.py's mimic-chain walk) -- so this is a single
+        multiply-add per mimic joint, not a walk.
+
+        Every joint in the model gets an entry, including fixed joints
+        (0.0 -- meaningless for FK, but present so a caller walking
+        chain() can read vals[j.name] unconditionally, with no ordering
+        or mimic-resolution knowledge of its own).
+        """
+        actuated = self.actuated_joints
+        if len(inputs) != len(actuated):
+            raise ValueError(
+                f"joint_values expected {len(actuated)} input value(s) "
+                f"(dof={len(actuated)}), got {len(inputs)}"
+            )
+        vals: dict[str, float] = {j.name: float(v) for j, v in zip(actuated, inputs)}
+        for j in self._bfs_all_joints():
+            if j.name in vals:
+                continue
+            if j.mimic is not None:
+                vals[j.name] = j.mimic.multiplier * vals[j.mimic.source] + j.mimic.offset
+            else:
+                vals[j.name] = 0.0
+        return vals

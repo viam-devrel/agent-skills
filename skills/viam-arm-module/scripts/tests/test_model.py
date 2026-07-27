@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from _armkit.model import Joint, KinematicModel
+from _armkit.model import Joint, KinematicModel, Mimic
 
 
 def rev(name, parent, child, lower=-1.0, upper=1.0):
@@ -9,6 +9,13 @@ def rev(name, parent, child, lower=-1.0, upper=1.0):
 
 def fixed(name, parent, child):
     return Joint(name, "fixed", parent, child, np.eye(4), None, None, None)
+
+
+def mimic_joint(name, parent, child, source, multiplier=1.0, offset=0.0):
+    return Joint(
+        name, "revolute", parent, child, np.eye(4), np.array([0, 0, 1.0]), 0.0, 0.0,
+        mimic=Mimic(source=source, multiplier=multiplier, offset=offset),
+    )
 
 
 def test_actuated_joints_excludes_fixed():
@@ -222,3 +229,41 @@ def test_chain_raises_on_no_joints():
     )
     with pytest.raises(ValueError, match="no joints"):
         m.chain()
+
+
+def test_joint_values_derives_mimics_and_fills_fixed_joints():
+    # Fix 3: joint_values() is the single place that knows BFS-input-order
+    # <-> joint-name mapping AND mimic derivation, so FK (A4) doesn't have
+    # to build either. Mirrors the worked example in the task: base_joint
+    # (fixed) gets 0.0, joint1/joint2 (actuated, BFS order) get the raw
+    # inputs, joint3 (mimics joint1, multiplier -1) is derived.
+    m = KinematicModel(
+        name="t",
+        joints=[
+            fixed("base_joint", "world", "link0"),
+            rev("joint1", "link0", "link1"),
+            rev("joint2", "link1", "link2"),
+            mimic_joint("joint3", "link2", "link3", source="joint1", multiplier=-1.0, offset=0.0),
+        ],
+        links={}, source_format="urdf", source_path="t.urdf",
+    )
+    assert m.dof == 2
+    vals = m.joint_values([0.5, -0.25])
+    assert vals == {
+        "base_joint": 0.0,
+        "joint1": 0.5,
+        "joint2": -0.25,
+        "joint3": -0.5,
+    }
+
+
+def test_joint_values_raises_on_wrong_input_count():
+    m = KinematicModel(
+        name="t",
+        joints=[rev("j1", "base", "l1"), rev("j2", "l1", "tip")],
+        links={}, source_format="urdf", source_path="t.urdf",
+    )
+    with pytest.raises(ValueError, match=r"expected 2 input value\(s\)"):
+        m.joint_values([0.1])
+    with pytest.raises(ValueError, match=r"expected 2 input value\(s\)"):
+        m.joint_values([0.1, 0.2, 0.3])
