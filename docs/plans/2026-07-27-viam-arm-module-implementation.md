@@ -71,8 +71,10 @@ the spec calls out.
 - **Testing:** `cd skills/viam-arm-module/scripts && uv run pytest`. The `pyproject.toml`
   exists for development only; end users never need it. Run from *inside* `scripts/` —
   the `uv run --project <dir> pytest` form invoked from the repo root does **not** load
-  `[tool.pytest.ini_options]` (pytest reports no configfile), so `testpaths` is ignored
-  and collection falls back to scanning the cwd. Verified during Task A1 review.
+  `[tool.pytest.ini_options]` (pytest reports no configfile), so `testpaths` is ignored,
+  collection falls back to scanning the cwd, **and `pythonpath` is ignored too — `_armkit`
+  will not import**, giving `ModuleNotFoundError`. That failure is loud and points at the
+  cause, which is the intended behavior. Verified during Task A1 review.
 - **`uv.lock` is committed** alongside `pyproject.toml`, pinning the dev/test environment.
   It has no effect on end users, who run the scripts via `uv run` + PEP 723. For a toolkit
   whose correctness rests on numpy numerics, a reproducible dev environment is worth the
@@ -782,6 +784,11 @@ git commit -m "feat(armkit): SVA and DH model JSON parsing"
 `trimesh` handles STL/OBJ/PLY natively and COLLADA via `pycollada`. COLLADA matters: ROS
 URDFs overwhelmingly reference `.dae`.
 
+**What `meshed.urdf` does not yet cover** (extend it in place if you want these): no
+`<origin>` inside the `<visual>`/`<collision>` elements, so `MeshReport.origin_offset_mm`
+has no fixture; and no single link carries both a visual and a collision mesh, so a
+pairing or dedup bug would go uncaught. Flagged during Task A1 review.
+
 - [ ] **Step 1: Extend the URDF parser to record mesh references**
 
 Parse `<collision>` and `<visual>` children of each `<link>`, recording `<geometry><mesh
@@ -997,6 +1004,12 @@ mesh collision geometry with bounding prisms) and `~/src/urdf-to-sva-converter/s
 
 Vendor rather than depend, per the spec. `convert` is an escape hatch, not the default
 path: only when no URDF exists or SVA is specifically required.
+
+**Heads-up on `ur20.urdf`:** it declares an orphan `world` link that no joint attaches to.
+This is deliberate fixture fidelity — real vendor URDFs carry exactly this kind of wart.
+If `convert` iterates `model.links` and looks up `link_poses[...]`, it will `KeyError` on a
+link with no pose. Handle it gracefully; do not "fix" the fixture. Flagged during Task A1
+review.
 
 - [ ] **Step 1: Write the failing test** — `simplify` on a URDF with a resolvable mesh emits a URDF whose collision geometry is a `<box>`, preserving the visual mesh. Requires a small fixture mesh; generate a cube STL with `trimesh` in `conftest.py`.
 - [ ] **Step 2: Run it and watch it fail.**
