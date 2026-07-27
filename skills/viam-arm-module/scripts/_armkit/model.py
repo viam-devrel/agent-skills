@@ -59,6 +59,8 @@ class KinematicModel:
 
     def chain(self) -> list[Joint]:
         """Joints ordered base to tip. Raises on missing/multiple roots, branching, cycles, or disconnection."""
+        if not self.joints:
+            raise ValueError("kinematic model has no joints")
         by_parent = {}
         for j in self.joints:
             by_parent.setdefault(j.parent, []).append(j)

@@ -136,3 +136,17 @@ def test_chain_raises_on_reachable_cycle():
     )
     with pytest.raises(ValueError, match="cycle in kinematic model"):
         m.chain()
+
+
+def test_chain_raises_on_no_joints():
+    # Covers: `if not self.joints` -> "kinematic model has no joints".
+    # A model with zero joints (e.g. a single-link URDF like RDK's
+    # capsule.urdf) previously fell through to `roots = []`, which
+    # tripped the "no root link (cycle?)" check and misdiagnosed a
+    # jointless model as a cyclic one. This must be caught first, with
+    # a message describing the actual condition.
+    m = KinematicModel(
+        name="t", joints=[], links={}, source_format="urdf", source_path="t.urdf",
+    )
+    with pytest.raises(ValueError, match="no joints"):
+        m.chain()

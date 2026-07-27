@@ -55,6 +55,16 @@ def _parse(path: Path) -> KinematicModel:
     except ET.ParseError as e:
         raise ValueError(f"{path}: malformed XML ({e})") from e
 
+    # A default xmlns on <robot> (e.g. xmlns="http://www.ros.org/urdf")
+    # makes ElementTree prefix EVERY tag in the tree as "{uri}tag", not
+    # just the root -- so stripping only the root tag would fix the
+    # misleading "not a URDF file" message here while silently breaking
+    # every findall("link")/findall("joint") below, replacing it with an
+    # even more confusing "no joints" report. Strip uniformly instead.
+    for elem in root.iter():
+        if elem.tag.startswith("{"):
+            elem.tag = elem.tag.split("}", 1)[1]
+
     if root.tag != "robot":
         raise ValueError(f"{path}: root element is <{root.tag}>, not <robot> -- not a URDF file")
 
@@ -68,9 +78,9 @@ def _parse(path: Path) -> KinematicModel:
     joints: list[Joint] = []
     for je in root.findall("joint"):
         jname = je.get("name")
-        context = f"{path}: joint {jname!r}"
         if not jname:
             raise ValueError(f"{path}: <joint> element missing a 'name' attribute")
+        context = f"{path}: joint {jname!r}"
 
         jtype = je.get("type")
         if jtype not in SUPPORTED_JOINT_TYPES:
@@ -125,6 +135,11 @@ def _parse(path: Path) -> KinematicModel:
             axis=axis, lower=lower, upper=upper,
         ))
 
+    for j in joints:
+        for role, ln in (("parent", j.parent), ("child", j.child)):
+            if ln not in links:
+                raise ValueError(f"{path}: joint {j.name!r} names {role} link {ln!r}, which is not declared")
+
     return KinematicModel(
         name=root.get("name", path.stem), joints=joints, links=links,
         source_format="urdf", source_path=str(path),
@@ -139,5 +154,10 @@ def parse_urdf(path: str | Path) -> KinematicModel:
         raise
     except Exception as e:
         # Safety net: guarantees the "one exception type" contract even
-        # for failure modes this parser doesn't anticipate by name.
-        raise ValueError(f"{path}: failed to parse URDF ({type(e).__name__}: {e})") from e
+        # for failure modes this parser doesn't anticipate by name. The
+        # wording is deliberate: this branch means armkit itself broke,
+        # not that the caller's file is bad -- don't blame the input.
+        raise ValueError(
+            f"internal error while parsing {path} ({type(e).__name__}: {e}) "
+            "-- this is an armkit bug, not a problem with your file"
+        ) from e

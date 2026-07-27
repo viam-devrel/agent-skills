@@ -413,3 +413,57 @@ def test_directory_path_raises_valueerror(tmp_path):
     # IsADirectoryError.
     with pytest.raises(ValueError, match="directory"):
         parse_urdf(tmp_path)
+
+
+def test_joint_referencing_undeclared_parent_link_raises(tmp_path):
+    # Covers the referential-integrity check added after Fix 1: a joint
+    # whose parent names a link that was never declared with <link
+    # name="..."/>. This is the exact shape of the real-world corpus
+    # hit (mycobot_with_vision_copy.urdf, an incomplete xacro fragment
+    # whose joint's parent, "joint1", is a link defined only in an
+    # <xacro:include>d file this parser never sees) -- previously this
+    # parsed cleanly and would report a misleadingly clean bill of
+    # health.
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="tip"/>
+      <joint name="j1" type="fixed">
+        <parent link="ghost_link"/><child link="tip"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="parent link 'ghost_link', which is not declared"):
+        parse_urdf(path)
+
+
+def test_joint_referencing_undeclared_child_link_raises(tmp_path):
+    # Mirrors the parent case for <child>.
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/>
+      <joint name="j1" type="fixed">
+        <parent link="base"/><child link="ghost_link"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="child link 'ghost_link', which is not declared"):
+        parse_urdf(path)
+
+
+def test_namespaced_root_parses_successfully(tmp_path):
+    # Covers Fix 4: a default xmlns on <robot> makes ElementTree report
+    # root.tag as "{uri}robot". Before stripping the namespace prefix,
+    # this was misreported as "not a URDF file" even though the file
+    # genuinely is one. No corpus file was found doing this, but the
+    # message was actively misleading, so it's pinned here.
+    path = _write(tmp_path, """
+    <robot xmlns="http://www.ros.org/urdf" name="t">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="fixed">
+        <parent link="base"/><child link="tip"/>
+      </joint>
+    </robot>
+    """)
+    m = parse_urdf(path)
+    assert m.name == "t"
+    assert [j.name for j in m.chain()] == ["j1"]
