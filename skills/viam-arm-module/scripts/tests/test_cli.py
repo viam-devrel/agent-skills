@@ -130,6 +130,61 @@ def test_validate_structure_finding_is_reported_once(fixtures):
 
 
 # ---------------------------------------------------------------------------
+# Fix 1: multi-leaf structure failures get a --tip remedy; other structure
+# failures (cycle, disconnection, multiple roots) do not.
+# ---------------------------------------------------------------------------
+
+def test_validate_multi_leaf_structure_finding_suggests_tip(fixtures):
+    # This is the single most common real-world failure: 30/84 real vendor
+    # URDFs branch because a gripper ships attached to the arm. RDK's own
+    # wording ("need exactly one end effector, have [...]") is kept
+    # verbatim for parity, but nothing in it mentions the fix -- a user's
+    # only realistic next move without a remedy is to read armkit's source.
+    r = run("validate", str(fixtures / "two_leaf.urdf"))
+    assert r.returncode == 1
+    assert "need exactly one end effector, have ['finger_l', 'finger_r']" in r.stdout
+    assert "--tip" in r.stdout
+    # armkit has the leaf list in hand and should suggest a concrete one,
+    # not just name the flag.
+    assert "--tip finger_l" in r.stdout
+
+
+def test_validate_cycle_structure_finding_has_no_tip_remedy(tmp_path):
+    # A cycle isn't fixed by declaring an end effector -- there's no
+    # coherent tree to walk regardless of which link is named tip. The
+    # remedy must be attached ONLY to the multi-leaf diagnosis.
+    path = write_urdf(tmp_path, """
+    <robot name="cyclic">
+      <link name="a"/><link name="b"/>
+      <joint name="j1" type="revolute">
+        <parent link="a"/><child link="b"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="revolute">
+        <parent link="b"/><child link="a"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    r = run("validate", str(path))
+    assert r.returncode == 1
+    assert "structure" in r.stdout
+    assert "--tip" not in r.stdout
+
+
+def test_validate_multi_leaf_remedy_resolves_the_model(fixtures):
+    # The remedy this fix prints must actually work -- re-running with the
+    # suggested --tip must pass.
+    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "finger_l")
+    assert r.returncode == 0, r.stdout
+    assert "PASS" in r.stdout
+
+
+# ---------------------------------------------------------------------------
 # --at outside limits -> exit 1 with input-out-of-bounds
 # ---------------------------------------------------------------------------
 

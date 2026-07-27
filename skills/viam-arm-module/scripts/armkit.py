@@ -34,7 +34,9 @@ guarantee RDK will load the file.**
 from __future__ import annotations
 
 import argparse
+import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -43,6 +45,13 @@ import numpy as np
 from _armkit.checks import Finding, check_at_bounds, check_dof, check_joint_limits, check_unit_scale
 from _armkit.fk import forward_kinematics
 from _armkit.urdf import parse_urdf
+
+# RDK's own wording for the multi-leaf case (referenceframe's
+# model_json.go, matched verbatim in _armkit/model.py's
+# _require_resolvable_tip -- see test_parity.py). Matched here only to
+# decide whether to attach a --tip remedy; the message text itself is never
+# altered, so parity with RDK's diagnosis stays intact.
+_MULTI_LEAF_RE = re.compile(r"need exactly one end effector, have (\[.*\])$")
 
 RDK_DIVERGENCE_NOTE = (
     "An armkit PASS does not guarantee RDK will load this file: RDK hard-fails on an "
@@ -105,6 +114,36 @@ def _matrix_to_wxyz_quaternion(r: np.ndarray) -> tuple[float, float, float, floa
         y = (r[1, 2] + r[2, 1]) / s
         z = 0.25 * s
     return float(w), float(x), float(y), float(z)
+
+
+def _structure_finding(message: str) -> Finding:
+    """Build the `structure` finding for a chain()/dof failure.
+
+    RDK's own wording is kept byte-for-byte in `message` -- test_parity.py
+    pins it for parity, and armkit being MORE useful than RDK is the point
+    of armkit existing, not a reason to paraphrase RDK's diagnosis. A remedy
+    is attached as a SEPARATE field, only for the multi-leaf case: 30 of 84
+    real vendor URDFs surveyed branch (a gripper shipping attached to the
+    arm is the common cause), and that failure is fixable with --tip, using
+    a leaf armkit already has in hand from the error message itself. A
+    cycle, disconnection, or multiple-roots failure gets no remedy here --
+    declaring a tip does not give the model a coherent tree to walk, so
+    suggesting --tip for those would send a user down a dead end of its own.
+    """
+    match = _MULTI_LEAF_RE.search(message)
+    if match is None:
+        return Finding("error", "structure", message)
+    try:
+        leaves = ast.literal_eval(match.group(1))
+    except (ValueError, SyntaxError):
+        leaves = []
+    suggestion = leaves[0] if leaves else "<link>"
+    remedy = (
+        "-> this model branches (common when a gripper ships attached to the arm).\n"
+        "   Re-run with --tip <link> to declare the end effector, e.g.\n"
+        f"   --tip {suggestion}"
+    )
+    return Finding("error", "structure", message, remedy=remedy)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -179,7 +218,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     try:
         chain = model.chain()
     except ValueError as e:
-        return _report(path, None, [Finding("error", "structure", str(e))], args)
+        return _report(path, None, [_structure_finding(str(e))], args)
 
     base = chain[0].parent
     tip = chain[-1].child
@@ -225,7 +264,10 @@ def _report(
         payload = {
             "file": str(path),
             "summary": summary,
-            "findings": [{"level": f.level, "code": f.code, "message": f.message} for f in findings],
+            "findings": [
+                {"level": f.level, "code": f.code, "message": f.message, "remedy": f.remedy}
+                for f in findings
+            ],
             "pose": pose_report,
             "verdict": verdict,
             "note": RDK_DIVERGENCE_NOTE,
@@ -240,6 +282,9 @@ def _report(
         for f in findings:
             tag = "ERROR" if f.is_error else "WARN"
             print(f"  [{tag}] {f.code}: {f.message}")
+            if f.remedy:
+                for line in f.remedy.splitlines():
+                    print(f"          {line}")
         if pose_report is not None:
             p, q = pose_report["point_mm"], pose_report["quat_wxyz"]
             print(f"pose at --at: point_mm=[{p[0]:.9f} {p[1]:.9f} {p[2]:.9f}] "

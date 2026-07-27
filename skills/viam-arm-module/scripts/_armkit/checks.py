@@ -36,6 +36,7 @@ class Finding:
     level: str   # "error" | "warn"
     code: str
     message: str
+    remedy: str | None = None   # armkit-authored fix suggestion, never RDK's own wording
 
     @property
     def is_error(self) -> bool:
