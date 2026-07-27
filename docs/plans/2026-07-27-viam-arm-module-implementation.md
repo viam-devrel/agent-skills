@@ -174,6 +174,15 @@ orientation types include Viam's own orientation-vector format.
 > test** so a future SDK change that "fixes" the buffer order fails loudly instead of
 > silently inverting poses.
 >
+> **Testing lesson, proven by mutation during A4b — carry this into A5.** A 180° rotation
+> matrix is symmetric (`R = 2·axis·axisᵀ − I`), so reshaping its flat buffer row-major or
+> column-major produces the *same* matrix. Under a deliberately wrong `order="C"`, **every
+> exact-`±π` case still passed** while every non-exact case failed. A rotation test suite
+> that checks only at `±π` is blind to a transpose. Always include angles *near* but not
+> at `±π` (e.g. `π − 1e-6`), and prefer asymmetric rotations when pinning any layout.
+> Orthonormality and `det == 1` are equally blind — a transposed rotation is still a
+> rotation.
+>
 > **Root cause, confirmed in source (not just measured):** `rust-utils`'
 > `viam_rotation_matrix_from_quaternion` returns `to_raw_pointer(&rot)` where
 > `rot: Rotation3<f64>` — nalgebra, which is column-major. Meanwhile RDK's Go convention
