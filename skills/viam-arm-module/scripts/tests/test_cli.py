@@ -283,6 +283,66 @@ def test_validate_inverted_limits_reported(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Fix 2: the RDK-parity note becomes specific (mesh references, a joint
+# missing <origin>) or is absent entirely, rather than a fixed disclaimer
+# printed on every invocation regardless of relevance.
+# ---------------------------------------------------------------------------
+
+def test_validate_warns_about_mesh_references_on_pass(fixtures):
+    # meshed.urdf has one visual mesh (base.dae) and one collision mesh
+    # (link1.stl) and is otherwise a valid, passing 1-DOF model.
+    r = run("validate", str(fixtures / "meshed.urdf"))
+    assert r.returncode == 0, r.stdout
+    assert "mesh-references" in r.stdout
+    assert "2 mesh" in r.stdout
+    assert "PASS" in r.stdout
+
+
+def test_validate_warns_about_missing_origin_on_pass(fixtures):
+    # no_origin.urdf's sole joint has no <origin> element -- armkit
+    # defaults it to identity (correct), but RDK v1.0.0 panics on this.
+    r = run("validate", str(fixtures / "no_origin.urdf"))
+    assert r.returncode == 0, r.stdout
+    assert "missing-origin" in r.stdout
+    assert "'j1'" in r.stdout
+    assert "PASS" in r.stdout
+
+
+def test_validate_prints_nothing_about_rdk_parity_when_neither_applies(fixtures):
+    # two_link.urdf has no meshes and every joint declares <origin>.
+    r = run("validate", str(fixtures / "two_link.urdf"))
+    assert r.returncode == 0
+    assert "mesh-references" not in r.stdout
+    assert "missing-origin" not in r.stdout
+
+
+def test_validate_drops_rdk_parity_findings_on_fail(fixtures):
+    # meshed.urdf has mesh references, but forcing a DOF mismatch makes it
+    # FAIL for an unrelated reason -- RDK parity is moot for a file that
+    # didn't even pass armkit's own checks, so the mesh warning must not
+    # appear alongside the real failure.
+    r = run("validate", str(fixtures / "meshed.urdf"), "--expect-dof", "5")
+    assert r.returncode == 1
+    assert "dof-mismatch" in r.stdout
+    assert "mesh-references" not in r.stdout
+
+
+def test_validate_json_rdk_parity_present_on_pass_null_on_fail(fixtures):
+    r_pass = run("validate", str(fixtures / "two_link.urdf"), "--json")
+    payload_pass = json.loads(r_pass.stdout)
+    assert payload_pass["rdk_parity"] == {"guaranteed": True, "reasons": []}
+
+    r_mesh = run("validate", str(fixtures / "meshed.urdf"), "--json")
+    payload_mesh = json.loads(r_mesh.stdout)
+    assert payload_mesh["rdk_parity"]["guaranteed"] is False
+    assert len(payload_mesh["rdk_parity"]["reasons"]) == 1
+
+    r_fail = run("validate", str(fixtures / "meshed.urdf"), "--expect-dof", "5", "--json")
+    payload_fail = json.loads(r_fail.stdout)
+    assert payload_fail["rdk_parity"] is None
+
+
+# ---------------------------------------------------------------------------
 # --json
 # ---------------------------------------------------------------------------
 
@@ -302,10 +362,13 @@ def test_validate_json_fail_verdict_matches_exit_code(fixtures):
     assert any(f["code"] == "dof-mismatch" for f in payload["findings"])
 
 
-def test_validate_json_includes_rdk_divergence_note(fixtures):
+def test_validate_json_has_no_generic_note_field(fixtures):
+    # Replaced by the per-file "rdk_parity" field (Fix 2) -- a fixed prose
+    # blob is not something a consumer can act on; see
+    # test_validate_json_rdk_parity_present_on_pass_null_on_fail.
     r = run("validate", str(fixtures / "two_link.urdf"), "--json")
     payload = json.loads(r.stdout)
-    assert "RDK" in payload["note"]
+    assert "note" not in payload
 
 
 # ---------------------------------------------------------------------------

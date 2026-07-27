@@ -78,6 +78,14 @@ class Joint:
     lower: float | None         # radians (or mm for prismatic)
     upper: float | None
     mimic: Mimic | None = None
+    # Whether the URDF had a <origin> element for this joint at all, as
+    # opposed to urdf.py defaulting a missing one to identity (correct, per
+    # the URDF spec). True by default so hand-built Joints in tests (which
+    # never set this) read as "declared" -- the interesting case (False) is
+    # something only urdf.py's parser actually observes. RDK v1.0.0 panics
+    # on a joint missing <origin> (see tests/test_parity.py); this is what
+    # lets a caller like armkit.py's validate warn about that risk per joint.
+    has_declared_origin: bool = True
 
     @property
     def actuated(self) -> bool:

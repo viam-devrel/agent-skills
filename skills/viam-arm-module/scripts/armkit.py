@@ -42,7 +42,14 @@ from pathlib import Path
 
 import numpy as np
 
-from _armkit.checks import Finding, check_at_bounds, check_dof, check_joint_limits, check_unit_scale
+from _armkit.checks import (
+    Finding,
+    check_at_bounds,
+    check_dof,
+    check_joint_limits,
+    check_rdk_parity_risks,
+    check_unit_scale,
+)
 from _armkit.fk import forward_kinematics
 from _armkit.urdf import parse_urdf
 
@@ -247,7 +254,19 @@ def cmd_validate(args: argparse.Namespace) -> int:
         quat_wxyz = list(_matrix_to_wxyz_quaternion(pose[:3, :3]))
         pose_report = {"point_mm": point_mm, "quat_wxyz": quat_wxyz}
 
+    # RDK-parity risk findings (Fix 2) are added only once nothing else has
+    # already failed -- RDK parity is moot for a file that didn't even pass
+    # armkit's own checks, so a FAIL should not also be cluttered with them.
+    if not any(f.is_error for f in findings):
+        findings += check_rdk_parity_risks(model)
+
     return _report(path, summary, findings, args, pose_report)
+
+
+# Codes emitted by check_rdk_parity_risks -- used only to summarize them
+# into the "rdk_parity" field below; the findings themselves are still
+# printed/JSON'd like any other finding.
+_RDK_PARITY_CODES = {"mesh-references", "missing-origin"}
 
 
 def _report(
@@ -260,6 +279,16 @@ def _report(
     ok = not any(f.is_error for f in findings)
     verdict = "PASS" if ok else "FAIL"
 
+    # A specific, per-file answer to "does armkit PASS mean RDK will load
+    # this?" in place of a fixed disclaimer printed every run regardless of
+    # relevance (Fix 2). Moot on a FAIL for a different reason -- None
+    # there, not an empty/misleading "guaranteed" claim.
+    if ok:
+        parity_findings = [f for f in findings if f.code in _RDK_PARITY_CODES]
+        rdk_parity = {"guaranteed": not parity_findings, "reasons": [f.message for f in parity_findings]}
+    else:
+        rdk_parity = None
+
     if args.json:
         payload = {
             "file": str(path),
@@ -270,7 +299,7 @@ def _report(
             ],
             "pose": pose_report,
             "verdict": verdict,
-            "note": RDK_DIVERGENCE_NOTE,
+            "rdk_parity": rdk_parity,
         }
         print(json.dumps(payload, indent=2))
     else:
@@ -290,7 +319,6 @@ def _report(
             print(f"pose at --at: point_mm=[{p[0]:.9f} {p[1]:.9f} {p[2]:.9f}] "
                   f"quat_wxyz=[{q[0]:.9f} {q[1]:.9f} {q[2]:.9f} {q[3]:.9f}]")
         print(verdict)
-        print(f"note: {RDK_DIVERGENCE_NOTE}")
 
     return 0 if ok else 1
 

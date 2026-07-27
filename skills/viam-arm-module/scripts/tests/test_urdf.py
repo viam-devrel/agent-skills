@@ -756,3 +756,39 @@ def test_namespaced_root_parses_successfully(tmp_path):
     m = parse_urdf(path)
     assert m.name == "t"
     assert [j.name for j in m.chain()] == ["j1"]
+
+
+def test_records_visual_and_collision_mesh_references(fixtures):
+    # Fix 2 (A7 review): armkit needs to COUNT mesh references (not resolve
+    # or inspect them -- that's A6's job) so validate can warn that RDK
+    # hard-fails on a missing mesh file, a risk armkit itself cannot see.
+    # meshed.urdf has one visual mesh on "base" and one collision mesh on
+    # "link1"; Link.visual_meshes/collision_meshes already existed in
+    # model.py but were never populated by the parser.
+    m = parse_urdf(fixtures / "meshed.urdf")
+    assert m.links["base"].visual_meshes == ["package://some_pkg/meshes/base.dae"]
+    assert m.links["link1"].collision_meshes == ["meshes/link1.stl"]
+
+
+def test_box_primitives_are_not_counted_as_mesh_references(fixtures):
+    # ur20.urdf uses <box> collision primitives and references no meshes at
+    # all -- test_parity.py already relies on this to justify "no
+    # unresolved-mesh findings expected here". Only <mesh> elements count.
+    m = parse_urdf(fixtures / "ur20.urdf")
+    assert all(not link.visual_meshes and not link.collision_meshes for link in m.links.values())
+
+
+def test_joint_with_origin_is_marked_declared(fixtures):
+    m = parse_urdf(fixtures / "two_link.urdf")
+    assert all(j.has_declared_origin for j in m.chain())
+
+
+def test_joint_without_origin_is_marked_not_declared(fixtures):
+    # no_origin.urdf's joint has no <origin> element at all. armkit
+    # defaults it to identity (correct, per the URDF spec) but must still
+    # be able to tell a caller that the default was applied -- RDK v1.0.0
+    # panics on exactly this case (see test_parity.py), and validate's
+    # Fix 2 needs to warn about it per-joint.
+    m = parse_urdf(fixtures / "no_origin.urdf")
+    j = m.chain()[0]
+    assert j.has_declared_origin is False

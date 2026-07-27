@@ -126,6 +126,53 @@ def check_dof(actuated: list[Joint], expect_dof: int | None) -> list[Finding]:
     return []
 
 
+def check_rdk_parity_risks(model: KinematicModel) -> list[Finding]:
+    """Findings that make the RDK-parity divergences (see tests/test_parity.py
+    and tools/rdkprobe/README.md) concrete for THIS file, in place of a fixed
+    disclaimer printed on every invocation regardless of relevance:
+
+    - `mesh-references`: RDK loads every referenced mesh file at parse time
+      and hard-fails if one can't be found on disk; armkit does not resolve
+      mesh paths at all (that's A6's job -- `unresolved-mesh`/`heavy-mesh`
+      are a later, per-file finer-grained check). A file that references
+      any mesh carries a real risk of an RDK-only rejection armkit cannot
+      see, and this is the single most common reason RDK rejects a real
+      vendor file -- flagging just the COUNT is cheap and honest without
+      pulling A6's resolution/inspection logic forward.
+    - `missing-origin`: RDK v1.0.0 panics (SIGSEGV, model_urdf.go:196) on a
+      joint with no <origin> element; armkit follows the URDF spec and
+      defaults it to identity, which is correct but means armkit will
+      happily pass a file that crashes RDK. Named per joint -- that's
+      actionable, since the user can add an explicit
+      <origin xyz="0 0 0" rpy="0 0 0"/> and move on.
+
+    Both are warn-level: neither is an armkit-detectable defect in the
+    file, they are places armkit's own (correct) permissiveness could be
+    hiding an RDK failure. Callers should only add these when the model has
+    no OTHER error findings -- RDK parity is moot for a file that didn't
+    even pass armkit's own checks.
+    """
+    findings: list[Finding] = []
+
+    mesh_count = sum(len(link.visual_meshes) + len(link.collision_meshes) for link in model.links.values())
+    if mesh_count:
+        findings.append(Finding(
+            "warn", "mesh-references",
+            f"file references {mesh_count} mesh file{'s' if mesh_count != 1 else ''} that armkit "
+            "does not resolve; RDK rejects a file whose meshes are missing",
+        ))
+
+    for j in model.joints:
+        if not j.has_declared_origin:
+            findings.append(Finding(
+                "warn", "missing-origin",
+                f"joint {j.name!r} has no <origin>; RDK v1.0.0 panics on this "
+                "(armkit follows the URDF spec and defaults to identity)",
+            ))
+
+    return findings
+
+
 def check_at_bounds(actuated: list[Joint], values: list[float]) -> list[Finding]:
     """input-out-of-bounds: an --at value outside its joint's declared limits.
 

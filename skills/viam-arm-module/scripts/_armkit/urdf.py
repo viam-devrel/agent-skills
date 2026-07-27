@@ -73,7 +73,20 @@ def _parse(path: Path) -> KinematicModel:
         name = le.get("name")
         if not name:
             raise ValueError(f"{path}: <link> element missing a 'name' attribute")
-        links[name] = Link(name=name)
+        # Mesh references are COUNTED here, not resolved or inspected --
+        # that is A6's job (unresolved-mesh, heavy-mesh, trimesh loading).
+        # This is the minimal addition needed for validate's Fix 2: knowing
+        # a file references N mesh files at all is enough to warn that RDK
+        # hard-fails on one it can't find, without armkit touching disk.
+        # findall() with a "/" path matches every <mesh> under every
+        # <visual>/<collision> sibling this link has, not just the first.
+        visual_meshes = [
+            m.get("filename") for m in le.findall("visual/geometry/mesh") if m.get("filename")
+        ]
+        collision_meshes = [
+            m.get("filename") for m in le.findall("collision/geometry/mesh") if m.get("filename")
+        ]
+        links[name] = Link(name=name, visual_meshes=visual_meshes, collision_meshes=collision_meshes)
 
     joints: list[Joint] = []
     for je in root.findall("joint"):
@@ -146,13 +159,15 @@ def _parse(path: Path) -> KinematicModel:
             # they're meaningless once the source joint's limits govern.
             lower, upper = 0.0, 0.0
 
+        origin_elem = je.find("origin")
         joints.append(Joint(
             name=jname, type=jtype,
             parent=parent_elem.get("link"),
             child=child_elem.get("link"),
-            origin=_origin(je.find("origin"), context),
+            origin=_origin(origin_elem, context),
             axis=axis, lower=lower, upper=upper,
             mimic=mimic,
+            has_declared_origin=origin_elem is not None,
         ))
 
     for j in joints:
