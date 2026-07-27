@@ -83,6 +83,19 @@ means RDK's behavior moved and armkit must follow deliberately.
 `parse_urdf` without evaluating `m.dof` never runs them, and 52 rejects silently
 reclassify as accepts.
 
+> **The corpus is not currently reproducible — fix this.** The 102/30/22/1 figures come
+> from ad-hoc scans over "every `.urdf` under `~/src` and `~/go/pkg/mod/go.viam.com`" on
+> one machine. No manifest or script was preserved, so the numbers above cannot be
+> re-derived by anyone else, which makes the drift procedure unrunnable as written.
+> Discovered during A4b when a re-scan could only find 75 of the files.
+>
+> **Add `tools/corpus_scan.py`** (alongside `rdkprobe`, not shipped with the skill): walk
+> a configurable list of roots, parse each `.urdf`, force `m.dof`, and print per-bucket
+> counts plus the file list per bucket. Commit a `corpus-manifest.txt` recording the exact
+> files and their verdicts at the time of capture, so a future scan diffs against a real
+> baseline rather than a remembered number. Machine-specific paths are fine as long as the
+> manifest says which machine and when.
+
 ## File structure
 
 ```
@@ -153,6 +166,26 @@ orientation types include Viam's own orientation-vector format.
 > expose this, because quaternions carry no layout. **Pin the layout with a dedicated
 > test** so a future SDK change that "fixes" the buffer order fails loudly instead of
 > silently inverting poses.
+>
+> **Root cause, confirmed in source (not just measured):** `rust-utils`'
+> `viam_rotation_matrix_from_quaternion` returns `to_raw_pointer(&rot)` where
+> `rot: Rotation3<f64>` — nalgebra, which is column-major. Meanwhile RDK's Go convention
+> really is row-major: `rotationMatrix.go:88` defines `At(row, col) = mat[3*row+col]`, and
+> `Mul` computes `X = mat[0]*v.X + mat[1]*v.Y + mat[2]*v.Z`. So the SDK docstring's claim
+> that the raw buffer coincides with RDK's row-major convention is **wrong**; its golden
+> parity tests likely pass because they compare via quaternion, which carries no layout.
+> Verified against released `viam-sdk 0.79.2` (FFI-backed) — not a stale-checkout artifact.
+> **This belongs in `sdk-gaps.md` (task B1) as a genuine, filable SDK bug.**
+
+**Do NOT use the `referenceframe` FFI in `rust-utils`.** The local branch
+`design/referenceframe-fk-parsing` implements `rf_model_from_bytes`, `rf_model_dof`,
+`rf_model_transform`, `rf_model_geometries_at`, and `rf_model_limits` with URDF parsing and
+RDK golden-fixture parity tests — substantially what armkit reimplements in Python. It is
+an **experimental workstream, unreleased and not expected to merge upstream** (confirmed by
+the author). The shipped `libviam_rust_utils.dylib` exports zero `rf_model` symbols.
+armkit keeps its own Python parser and FK. Recorded so this overlap is not rediscovered
+and re-litigated. Note the distinction from `viam.spatialmath`, which *is* merged,
+released, and correct to depend on.
 
 ## Error-handling contract
 
