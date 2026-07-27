@@ -562,6 +562,12 @@ imports it. Give it its own unit test (orthonormality and `det == 1` over a spre
 axes and angles); a rotation helper that only gets exercised through FK is one whose
 failures surface as confusing pose errors rather than as a failing unit test.
 
+**Sequence note: run A3b before A4 if possible.** A3b changes what FK consumes — mimic
+joints take no input slot and derive their value from a source joint, the tip becomes
+explicit rather than implied by `chain()[-1].child`, and input order becomes BFS. Building
+FK against the pre-parity model means rewriting it. If A4 does land first, treat these
+three as known-pending changes rather than discovering them.
+
 - [ ] **Step 1: Write the failing test**
 
 The synthetic fixture was designed to make these hand-computable.
@@ -1177,6 +1183,80 @@ The Phase 5 gate. Separate entry point so the offline loop never pulls `viam-sdk
 - [ ] **Step 3: Report per-language expectations** — Go with `SingleOperationManager` should pass both; Python can pass the drop test but needs hand-rolled single-flight for the interrupt test; C++ needs both hand-rolled. Print which behavior was expected for the module's language so a failure is interpretable.
 - [ ] **Step 4: Same workspace guard as `fk-diff`.**
 - [ ] **Step 5: Commit** — `feat(armkit): ops-test cancellation checks (advisory)`
+
+---
+
+### Task A3b: RDK parity
+
+**Files:**
+- Modify: `_armkit/model.py`, `_armkit/urdf.py`, `_armkit/sva.py` (when A5 lands)
+- Test: `tests/test_model.py`, `tests/test_urdf.py`, `tests/test_parity.py` (new)
+
+**Goal: armkit accepts exactly what RDK accepts — no more, no less.** Four gaps, all
+measured against RDK v1.0.0 by executing it, not by reading it.
+
+**A reusable Go probe exists** at `<scratchpad>/rdkprobe/` — a ~25-line program calling
+`referenceframe.KinematicModelFromFile` and printing ACCEPT/DoF or REJECT/error for each
+path given. Use it as the oracle for every claim in this task. If it has been cleaned up,
+recreate it; the cost is minutes and it is the only way to check parity honestly.
+
+**Correction on the record:** an earlier draft of this plan asserted RDK accepts branching
+models and armkit was wrongly rejecting ~30 of 84 corpus URDFs. That was wrong.
+`SimpleModel` supports branching *structurally*, but `model_json.go:129` requires exactly
+one leaf when no `output_frames` is declared, and URDF cannot declare one. Measured on a
+synthetic two-leaf URDF: `REJECT — need exactly one end effector, have [finger_l finger_r]`.
+
+#### 1. Mimic joints must not consume input slots
+
+RDK excludes mimic frames from the input schema and derives their value at runtime as
+`multiplier * inputs[source] + offset` (`model.go`, `mimicMappings`). Measured on
+`referenceframe/testfiles/test_mimic_serial.urdf`: **RDK DoF=2, armkit DoF=3.** A live
+correctness bug, independent of branching.
+
+- Parse `<mimic joint="..." multiplier="..." offset="..."/>` in `urdf.py`. `multiplier`
+  defaults to 1, `offset` to 0.
+- Add a `mimic` field to `Joint`. A mimic joint is still a joint in the tree — it just
+  takes no input slot.
+- `actuated_joints` and `dof` must exclude mimic joints.
+- FK derives the mimic value from its source joint's value.
+- RDK zeroes a mimic joint's own `Min`/`Max` (`model_urdf.go:191`) because the source
+  joint's limits govern. Match that.
+
+#### 2. Multi-leaf models: match RDK's diagnosis
+
+Replace the `branching at link ...` error with RDK's framing. A **leaf** is a link that is
+never any joint's parent. Rules:
+
+- exactly one leaf, no declared tip → that leaf is the tip
+- multiple leaves, no declared tip → `need exactly one end effector, have [...]`, listing
+  the leaves sorted
+- a declared tip → use it; branching is legal
+
+This makes `chain()` leaf-based rather than branch-based. Roughly 29 corpus files hit this
+path; they should keep failing, but with RDK's message.
+
+#### 3. Declared tip support
+
+- SVA JSON: honor `output_frames`. More than one is an error in RDK
+  (`multiple output frames are not yet supported`) — match that.
+- URDF has no equivalent, so add a `--tip LINK` CLI flag. This is the escape hatch that
+  lets a user analyze a gripper-bearing vendor URDF by naming the arm's flange.
+- A declared tip that does not exist in the model is an error naming the available leaves.
+
+#### 4. BFS input ordering
+
+Once a declared tip permits branching, input order stops being obvious. RDK orders the
+flat input vector by **BFS over the frame system** and maps chain frames to offsets,
+because "sibling-branch frames with nonzero DoF occupy slots between chain frames"
+(`model.go:150`). Serial models are unaffected — BFS order equals chain order. Implement
+BFS ordering in `actuated_joints` and verify a serial model's order is unchanged.
+
+**Gate:** a new `tests/test_parity.py` asserting armkit's accept/reject verdict and DoF
+match the Go probe's, across a fixture list including `test_mimic_serial.urdf`, a
+synthetic two-leaf file, a declared-tip case, and the existing fixtures. Where armkit
+deliberately differs — it reports unresolved meshes as a finding where RDK hard-fails
+during parse — assert the difference explicitly so it is a decision on the record rather
+than drift.
 
 ---
 
