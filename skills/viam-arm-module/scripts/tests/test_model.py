@@ -3,13 +3,21 @@ import pytest
 from _armkit.model import Joint, KinematicModel
 
 
+def rev(name, parent, child, lower=-1.0, upper=1.0):
+    return Joint(name, "revolute", parent, child, np.eye(4), np.array([0, 0, 1.0]), lower, upper)
+
+
+def fixed(name, parent, child):
+    return Joint(name, "fixed", parent, child, np.eye(4), None, None, None)
+
+
 def test_actuated_joints_excludes_fixed():
     m = KinematicModel(
         name="t",
         joints=[
-            Joint("j1", "revolute", "base", "l1", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
-            Joint("f1", "fixed", "l1", "l2", np.eye(4), None, None, None),
-            Joint("j2", "revolute", "l2", "tip", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
+            rev("j1", "base", "l1"),
+            fixed("f1", "l1", "l2"),
+            rev("j2", "l2", "tip"),
         ],
         links={}, source_format="urdf", source_path="t.urdf",
     )
@@ -21,8 +29,8 @@ def test_chain_orders_base_to_tip():
     m = KinematicModel(
         name="t",
         joints=[
-            Joint("j2", "revolute", "l1", "tip", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
-            Joint("j1", "revolute", "base", "l1", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
+            rev("j2", "l1", "tip"),
+            rev("j1", "base", "l1"),
         ],
         links={}, source_format="urdf", source_path="t.urdf",
     )
@@ -38,8 +46,8 @@ def test_chain_raises_on_branching():
     m = KinematicModel(
         name="t",
         joints=[
-            Joint("j1", "revolute", "base", "l1", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
-            Joint("j2", "revolute", "base", "l2", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
+            rev("j1", "base", "l1"),
+            rev("j2", "base", "l2"),
         ],
         links={}, source_format="urdf", source_path="t.urdf",
     )
@@ -58,8 +66,8 @@ def test_chain_raises_on_multiple_roots():
     m = KinematicModel(
         name="t",
         joints=[
-            Joint("j1", "revolute", "base", "l1", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
-            Joint("j2", "revolute", "x", "y", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
+            rev("j1", "base", "l1"),
+            rev("j2", "x", "y"),
         ],
         links={}, source_format="urdf", source_path="t.urdf",
     )
@@ -75,12 +83,15 @@ def test_chain_raises_on_disconnected_joints():
     # "y" is ever picked up as a root; only "base" is. The walk from
     # "base" reaches "l1" and stops (nothing has parent "l1"), leaving
     # the two cycle joints unvisited, so the final count check fires.
+    # This cycle is unreachable from the root, so it does NOT trip the
+    # cycle guard in the walk -- that guard only fires for cycles the
+    # walk actually steps into (see test_chain_raises_on_reachable_cycle).
     m = KinematicModel(
         name="t",
         joints=[
-            Joint("j1", "revolute", "base", "l1", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
-            Joint("j2", "revolute", "x", "y", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
-            Joint("j3", "revolute", "y", "x", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
+            rev("j1", "base", "l1"),
+            rev("j2", "x", "y"),
+            rev("j3", "y", "x"),
         ],
         links={}, source_format="urdf", source_path="t.urdf",
     )
@@ -96,10 +107,32 @@ def test_chain_raises_on_no_root():
     m = KinematicModel(
         name="t",
         joints=[
-            Joint("j1", "revolute", "x", "y", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
-            Joint("j2", "revolute", "y", "x", np.eye(4), np.array([0, 0, 1.0]), -1.0, 1.0),
+            rev("j1", "x", "y"),
+            rev("j2", "y", "x"),
         ],
         links={}, source_format="urdf", source_path="t.urdf",
     )
     with pytest.raises(ValueError, match="no root link"):
+        m.chain()
+
+
+def test_chain_raises_on_reachable_cycle():
+    # Covers: `if current in seen` -> "cycle in kinematic model at link
+    # ...". A root chain (base->l1) leading directly into a cycle
+    # (l1->l2, l2->l1). Unlike test_chain_raises_on_disconnected_joints,
+    # this cycle IS reachable from the root, so the walk steps into it
+    # and would loop forever without the seen-set guard. No timeout
+    # marker: pytest-timeout is not installed in this project, so a
+    # regression that reintroduces the infinite loop would hang this
+    # test (and CI) rather than fail fast. Noted as a known gap.
+    m = KinematicModel(
+        name="t",
+        joints=[
+            rev("j1", "base", "l1"),
+            rev("j2", "l1", "l2"),
+            rev("j3", "l2", "l1"),
+        ],
+        links={}, source_format="urdf", source_path="t.urdf",
+    )
+    with pytest.raises(ValueError, match="cycle in kinematic model"):
         m.chain()

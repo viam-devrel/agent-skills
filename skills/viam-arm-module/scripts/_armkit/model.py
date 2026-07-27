@@ -17,7 +17,7 @@ import numpy as np
 ACTUATED_TYPES = {"revolute", "continuous", "prismatic"}
 
 
-@dataclass
+@dataclass(eq=False)
 class Joint:
     name: str
     type: str
@@ -41,7 +41,7 @@ class Link:
     collision_primitives: list[dict] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(eq=False)
 class KinematicModel:
     name: str
     joints: list[Joint]
@@ -69,8 +69,11 @@ class KinematicModel:
         if len(set(roots)) > 1:
             raise ValueError(f"multiple root links: {sorted(set(roots))}")
 
-        ordered, current = [], roots[0]
+        ordered, current, seen = [], roots[0], set()
         while current in by_parent:
+            if current in seen:
+                raise ValueError(f"cycle in kinematic model at link {current!r}")
+            seen.add(current)
             branches = by_parent[current]
             if len(branches) > 1:
                 names = sorted(b.name for b in branches)
