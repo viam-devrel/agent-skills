@@ -244,7 +244,14 @@ Rules:
    reports PASS is worse than one that fails loudly.
 4. **CLI subcommands catch `ValueError` only**, and convert it to an error finding with
    exit 1. If a subcommand needs a broader catch, the parser is not holding up its end.
-5. **Every `pytest.raises(ValueError)` MUST supply a `match=` argument.** This convention is
+5. **Do not narrow `parse_urdf`'s `except Exception` safety net.** A non-obvious contract
+   depends on it: `viam-sdk`'s `load_native_lib` raises `OSError`, and the load is *lazy*
+   (`_ffi.lib()` runs per-conversion, not at import), so a native-library failure surfaces
+   inside `parse_urdf`. The catch-all converts it to a `ValueError` carrying the original
+   text, which is what `armkit.py` matches on to emit its platform message and exit 2.
+   Narrow the catch and that path silently regresses to a traceback. Verified during A7
+   review with a `sitecustomize` shim making `load_native_lib` raise.
+6. **Every `pytest.raises(ValueError)` MUST supply a `match=` argument.** This convention is
    load-bearing, not style. Because the parsers convert internal bugs into the same
    exception type as user-input errors, a bare `pytest.raises(ValueError)` will pass when
    the parser crashes on its own bug — a green test proving nothing. Verified during A3
