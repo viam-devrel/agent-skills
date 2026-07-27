@@ -26,7 +26,7 @@ class Mimic:
     RDK derives a mimic joint's position at runtime rather than giving it
     its own input slot, so a joint carrying this is excluded from
     actuated_joints/dof even though it is a real joint in the tree and
-    still contributes a transform (see KinematicModel._bfs_all_joints).
+    still contributes a transform (see KinematicModel.bfs_joints).
 
     `source`/`multiplier`/`offset` are the COMPOSED values -- for a
     mimic-of-a-mimic, urdf.py's resolution walk collapses the chain down
@@ -126,7 +126,7 @@ class KinematicModel:
             raise ValueError(f"multiple root links: {sorted(set(roots))}")
         return by_parent, roots[0]
 
-    def _bfs_all_joints(self) -> list[Joint]:
+    def bfs_joints(self) -> list[Joint]:
         """Every joint in the tree, BFS-ordered from the root.
 
         This is RDK's model.go:150 input-ordering strategy: the flat
@@ -140,6 +140,15 @@ class KinematicModel:
         root->tip), which would misfire once branching-with-a-declared-
         tip made "on the tip path" a legitimately incomplete subset of
         "in the model".
+
+        Public (not `_bfs_all_joints`, its original name): fk.py's
+        link_poses() needs this same whole-tree walk to produce a pose
+        for every link, not just the ones on chain()'s root->tip path
+        (a branch link like a second gripper finger has a perfectly
+        well-defined pose and belongs in the result) -- and reaching
+        through a leading-underscore "private" method from another
+        module would undo the separation joint_values() was written to
+        buy. Behavior is unchanged; only the name and its visibility.
         """
         by_parent, root = self._validate_roots()
         order: list[Joint] = []
@@ -201,7 +210,7 @@ class KinematicModel:
         # Mimic joints are excluded (Part 1): they're real joints in the
         # tree and still contribute a transform, they just don't consume
         # an input slot -- RDK derives their value at runtime instead.
-        order = self._bfs_all_joints()
+        order = self.bfs_joints()
         # Calling this purely for its raise-if-ambiguous side effect (the
         # name says so, so this isn't a discardable-looking no-op): RDK
         # never produces a Model at all for a tree with an unresolved
@@ -218,10 +227,10 @@ class KinematicModel:
         """Joints ordered root to tip.
 
         Raises on missing/multiple roots, cycles, or disconnection
-        (via _bfs_all_joints -- see there for why those checks moved),
+        (via bfs_joints -- see there for why those checks moved),
         or on an ambiguous/unreachable tip (via _require_resolvable_tip).
         """
-        self._bfs_all_joints()  # validate roots/cycles/disconnection first
+        self.bfs_joints()  # validate roots/cycles/disconnection first
         tip = self._require_resolvable_tip()
 
         child_to_joint = {j.child: j for j in self.joints}
@@ -263,11 +272,11 @@ class KinematicModel:
         """
         # One BFS walk, reused for both the actuated subset (to line up
         # with `inputs`) and the mimic/fixed fill below -- not one walk
-        # via actuated_joints plus a second, separate _bfs_all_joints()
+        # via actuated_joints plus a second, separate bfs_joints()
         # call. _require_resolvable_tip() is still called directly (not
         # just via actuated_joints) so an ambiguous-tip model still
         # raises here, matching actuated_joints/dof/chain().
-        order = self._bfs_all_joints()
+        order = self.bfs_joints()
         self._require_resolvable_tip()
         actuated = [j for j in order if j.actuated and j.mimic is None]
 

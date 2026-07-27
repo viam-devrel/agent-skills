@@ -51,18 +51,26 @@ def joint_transform(joint: Joint, value: float) -> np.ndarray:
 def link_poses(model: KinematicModel, inputs) -> dict[str, np.ndarray]:
     """Every link's 4x4 pose relative to the model's base link.
 
+    Walks model.bfs_joints() -- every joint in the tree, not just the
+    ones on chain()'s root-to-tip path -- so a branch link off the tip
+    path (e.g. a second gripper finger) still gets a pose. BFS order
+    guarantees each joint's parent link is already placed before that
+    joint is processed, since the parent was either the root (seeded
+    below) or was itself a `child` earlier in the same walk. A link
+    that no joint ever references (fully disconnected from the tree --
+    e.g. an unused "world" link some URDFs declare) has no pose here,
+    correctly: there is nothing to compute it from.
+
     `inputs` is the flat BFS-ordered input vector (see
     KinematicModel.joint_values); a DoF mismatch is raised there and
     propagates unchanged, since a ValueError from a mismatched input
     count is already exactly the contract this module needs.
     """
     vals = model.joint_values(inputs)
-    chain = model.chain()
-    poses = {chain[0].parent: np.eye(4)}
-    current = np.eye(4)
-    for j in chain:
-        current = current @ joint_transform(j, vals[j.name])
-        poses[j.child] = current.copy()
+    poses: dict[str, np.ndarray] = {}
+    for j in model.bfs_joints():
+        parent = poses.setdefault(j.parent, np.eye(4))
+        poses[j.child] = parent @ joint_transform(j, vals[j.name])
     return poses
 
 

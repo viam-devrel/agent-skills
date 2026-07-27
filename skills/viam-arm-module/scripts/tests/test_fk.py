@@ -170,6 +170,29 @@ def test_revolute_prismatic_matches_rdk(fixtures):
     assert j2.upper == 500.0
 
 
+def test_link_poses_covers_branch_links_not_just_chain(fixtures):
+    # two_leaf.urdf has 4 links (base, palm, finger_l, finger_r) but a
+    # single tip path (base -> palm -> finger_l) visits only 3 of them.
+    # link_poses's own docstring promises "every link's pose", so a
+    # branch link RDK would compute a perfectly well-defined pose for
+    # (finger_r) must not be silently dropped -- A6's inspect_meshes
+    # iterates model.links and would KeyError on whatever chain() skips.
+    m = parse_urdf(fixtures / "two_leaf.urdf", tip="finger_l")
+    assert m.dof == 3  # j0, jl, jr -- branch joints consume input slots too
+    poses = link_poses(m, [0.0, 0.0, 0.0])
+    assert set(poses.keys()) == {"base", "palm", "finger_l", "finger_r"}
+
+
+def test_link_poses_omits_orphan_link_with_no_joint(fixtures):
+    # ur20.urdf declares a "world" link that no joint ever references as
+    # parent or child -- it is disconnected from the tree entirely, not
+    # merely off the tip path. It has no pose (there is nothing to
+    # compute it from), and link_poses must not invent one.
+    m = parse_urdf(fixtures / "ur20.urdf")
+    poses = link_poses(m, [0.1, -0.4, 0.7, 0.2, -0.3, 0.5])
+    assert "world" not in poses
+
+
 def test_two_link_link_poses(fixtures):
     # link1's pose is exactly j1's origin translation (1000mm along x)
     # at the zero configuration -- hand-computable, and cross-checked:
