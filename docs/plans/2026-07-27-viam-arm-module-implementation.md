@@ -17,6 +17,69 @@
 Workstreams A and B are independent and can proceed in parallel. C depends on both. A is
 real software with tests; B is documentation verified against source; C is assembly.
 
+## Execution order — revised after A3b
+
+The original order (all of A, then B, then C) was written before we had velocity data.
+Four tasks consumed ~28 commits and a dozen review rounds; 21 tasks remain. The review
+depth is earning its cost — fourteen findings, all real, several that would have shipped
+silently wrong FK — but the sizing assumed otherwise.
+
+**Revised to ship a thin vertical slice first**, so there is a usable skill with one real
+gate before the long tail:
+
+| # | Tasks | Outcome |
+|---|---|---|
+| 1 | A0 (probe), **A4** (FK), **A7** (validate CLI) | Phase 1's gate is real and runnable |
+| 2 | **C1** (SKILL.md), **C2** (registration) | A working, installable skill |
+| 3 | A6, A8, A9 | Mesh inspection, `meshes`/`simplify`/`convert` |
+| 4 | A5a/A5b/A5c (SVA, split) | Second parser |
+| 5 | A10, A11, A12 | Cross-check and live-machine checks |
+| 6 | B1–B8 | References, written last |
+
+**Why B moves last:** the references describe behavior. Written now they would describe
+*intended* behavior; written after the toolkit they describe *verified* behavior.
+
+**Known risk, unmitigated so far:** Workstream B is nine documents written from reading
+SDK source. That is precisely the method that produced this session's worst defects — the
+522 mm orientation error, the unpassable mesh assertions, the self-loop folding rule. The
+Go probe grounds RDK claims but does nothing for Python or C++ SDK claims, which B is full
+of. Before starting B, decide how its claims get verified; "every claim cites file:line"
+is the current rule and is not sufficient alone, since a citation can be real and the
+conclusion drawn from it still wrong.
+
+**Scope adjustments within the slice:** A7's findings table includes `unresolved-mesh` and
+`heavy-mesh`, which depend on A6. Ship A7 without them and add them when A6 lands, rather
+than pulling A6 forward. C1's `SKILL.md` describes all seven workflow phases — that is the
+knowledge deliverable and is correct — but must state plainly which gates have tooling
+today and which are manual.
+
+### Task A0: Promote the Go probe into the repo
+
+**Files:** create `skills/viam-arm-module/scripts/rdkprobe/{main.go,go.mod,README.md}`
+
+The probe is now load-bearing: it is the parity oracle *and* A4's FK oracle, and it
+currently lives in a session-scoped scratchpad. If it vanishes, the next person re-derives
+parity by reading RDK — the method that produced most of this session's defects.
+
+- Move `main.go` verbatim from the scratchpad (supports `--at q1,q2,...`, printing RDK's
+  `Transform()` point and quaternion at 9 decimals).
+- `README.md` states what it is for, how to run it, that it pins RDK v1.0.0, and that
+  `tests/test_parity.py`'s literals came from it.
+- **Not part of the skill's published surface** — it is a development tool needing a Go
+  toolchain, not something end users run. Say so in the README.
+
+### Parity drift
+
+`tests/test_parity.py` pins RDK v1.0.0 with date-stamped literals. When RDK bumps: re-run
+the probe over the parity fixtures, diff against the recorded literals, and re-run the
+corpus scan expecting 102 accepted / 30 end-effector / 22 jointless / 1 undeclared-link
+across the 155 real files. A changed verdict is a **finding, not a test to update** — it
+means RDK's behavior moved and armkit must follow deliberately.
+
+**Corpus-scan trap:** the topology checks are lazy properties. A scan that only calls
+`parse_urdf` without evaluating `m.dof` never runs them, and 52 rejects silently
+reclassify as accepts.
+
 ## File structure
 
 ```
@@ -730,6 +793,23 @@ git commit -m "feat(armkit): forward kinematics"
 ---
 
 ### Task A5: SVA and DH model JSON parser
+
+> **Split into three tasks after A3b.** As written below this is one task, but it needs:
+> the uniform link/joint mapping, five orientation types spanning three angular
+> conventions, `output_frames`, DH support, mimic-in-SVA, and geometry. A3b demonstrated
+> that a task this wide generates several review rounds and hidden depth.
+>
+> - **A5a — SVA core.** Uniform mapping, links/joints, limits (degrees→radians), the
+>   trailing-link fixed joint. Ships with `ov_degrees` only; other orientation types raise
+>   a clear "unsupported orientation type" error.
+> - **A5b — Orientations.** `ov_radians`, `euler_angles` (reusing `rpy_to_matrix`),
+>   `axis_angles`, `quaternion`. Each with its own unit test against a known rotation.
+>   The `ur20.urdf` ↔ `ur20.json` 0.000 mm agreement is the integration gate.
+> - **A5c — `output_frames`, DH, mimic-in-SVA.** Honor `output_frames` (more than one is
+>   an error, matching RDK); DH as a `kinematic_param_type`; SVA mimic configs.
+>   **This is the trigger for extracting `model.py`'s topology trio** (`_validate_roots`,
+>   `_bfs_all_joints`, `_require_resolvable_tip`) into their own module — deferred twice
+>   on the reviewer's advice, and this is the task that was named as the trigger.
 
 **Files:**
 - Create: `skills/viam-arm-module/scripts/_armkit/sva.py`
