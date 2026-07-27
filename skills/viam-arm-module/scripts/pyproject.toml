@@ -1,0 +1,12 @@
+# Development/test only. End users run the scripts via `uv run` and PEP 723 headers.
+[project]
+name = "armkit-dev"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "trimesh>=4.0", "pycollada>=0.8"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
