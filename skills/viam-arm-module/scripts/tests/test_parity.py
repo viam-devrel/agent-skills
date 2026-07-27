@@ -11,8 +11,12 @@ here deliberately -- don't just make the assertion pass.
 """
 from __future__ import annotations
 
+import math
+
+import numpy as np
 import pytest
 
+from _armkit.fk import forward_kinematics
 from _armkit.urdf import parse_urdf
 
 
@@ -172,3 +176,50 @@ def test_mesh_and_origin_divergences_are_deliberate(fixtures):
 
     m = parse_urdf(fixtures / "no_origin.urdf")
     assert m.dof == 1
+
+
+def test_fk_does_not_enforce_joint_limits_yet(fixtures):
+    # A THIRD divergence, recorded like the two above but of a different
+    # character: RDK's Transform() validates each input against the
+    # joint's <limit> before computing a pose; _armkit/fk.py does not --
+    # forward_kinematics() will happily compute a pose for an
+    # out-of-range input. Unlike the mesh/no-origin divergences (armkit
+    # is deliberately more permissive there because it is *right* and
+    # RDK is not), this one armkit intends to CLOSE: it's an omission,
+    # not a design choice, and belongs with the other validation
+    # findings in A7 (see the "input-out-of-bounds" row added to A7's
+    # findings table in the plan) -- not implemented here, since A4's
+    # scope is computing poses, not validating inputs.
+    #
+    # Probe (RDK v1.0.0), 2026-07-27, against two_link.urdf (limits
+    # -3.14159/3.14159 on both joints):
+    #   go run . two_link.urdf --at 0,3.141592653589793   (math.pi, 2.65e-6 over)
+    #     REJECT  Transform error: Frame: probe.j2 (joint 1): input out
+    #             of bounds, input 3.14159 needs to be within range
+    #             [3.14159 -3.14159]
+    #   go run . two_link.urdf --at 0,100.0                (~16 revolutions)
+    #     REJECT  Transform error: Frame: probe.j2 (joint 1): input out
+    #             of bounds, input 100.00000 needs to be within range
+    #             [3.14159 -3.14159]
+    #   go run . two_link.urdf --at 1000000,0
+    #     REJECT  Transform error: Frame: probe.j1 (joint 0): input out
+    #             of bounds, input 1000000.00000 needs to be within
+    #             range [3.14159 -3.14159]
+    # armkit computes a pose for all three inputs above instead of
+    # rejecting.
+    #
+    # This is exactly why test_fk.py's
+    # test_two_link_j2_rotates_without_moving_tip uses the literal
+    # 3.14159 rather than math.pi: RDK rejects math.pi as out-of-bounds
+    # (first probe run above), so a test wanting the ~180-degree pose has
+    # to stay just inside the limit armkit doesn't yet check.
+    m = parse_urdf(fixtures / "two_link.urdf")
+
+    pose = forward_kinematics(m, [0.0, math.pi])
+    assert np.allclose(pose[:3, 3], [2000.0, 0.0, 0.0], atol=1e-6)
+
+    pose = forward_kinematics(m, [0.0, 100.0])
+    assert np.allclose(pose[:3, 3], [2000.0, 0.0, 0.0], atol=1e-6)
+
+    pose = forward_kinematics(m, [1_000_000.0, 0.0])
+    assert not np.allclose(pose[:3, 3], [2000.0, 0.0, 0.0], atol=1e-3)

@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from _armkit.fk import forward_kinematics, joint_transform, link_poses
+from _armkit.transforms import axis_angle_to_matrix
 from _armkit.urdf import parse_urdf
 
 POINT_TOL_MM = 1e-6
@@ -165,6 +166,30 @@ def test_joint_transform_fixed_is_identity_times_origin(fixtures):
     fixed = next(j for j in m.joints if j.type == "fixed")
     t = joint_transform(fixed, 0.0)
     assert np.allclose(t, fixed.origin)
+
+
+@pytest.mark.parametrize("axis,expected_quat,label", [
+    (np.array([1.0, 0.0, 0.0]), [0.0, 1.0, 0.0, 0.0], "x"),
+    (np.array([0.0, 1.0, 0.0]), [0.0, 0.0, 1.0, 0.0], "y"),
+    (np.array([0.0, 0.0, 1.0]), [0.0, 0.0, 0.0, 1.0], "z"),
+])
+def test_quaternion_from_matrix_handles_180_degree_rotations(axis, expected_quat, label):
+    # _quaternion_from_matrix uses Shepperd's method, which branches on
+    # the trace and (once the trace isn't positive) on which diagonal
+    # entry dominates. Every pose test above takes the trace>0 branch
+    # (branch 1) -- none of them get anywhere near 180 degrees. This
+    # exercises the other three branches directly: a 180-degree turn
+    # about X makes m[0,0] the dominant diagonal entry (branch 2), about
+    # Y makes m[1,1] dominant (branch 3), and about Z falls through to
+    # the else (branch 4). Confirmed by instrumenting
+    # _quaternion_from_matrix's branch logic during development: X, Y, Z
+    # took branches 2, 3, 4 respectively, each producing (up to float
+    # noise ~6e-17 on w) exactly the expected quaternion below -- so this
+    # is not a test that happens to pass via branch 1.
+    r = axis_angle_to_matrix(axis, np.pi)
+    q = _quaternion_from_matrix(r)
+    dot = float(np.dot(q, np.array(expected_quat)))
+    assert abs(abs(dot) - 1.0) < 1e-6, (label, q, expected_quat, dot)
 
 
 def test_joint_transform_unsupported_type_raises():
