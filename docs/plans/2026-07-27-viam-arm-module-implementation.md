@@ -669,12 +669,28 @@ upper_arm_link parent: shoulder_lift_joint  translation x=-425    (+ geometry)
 ee_link        parent: wrist_3_joint        translation           <- trailing tip offset
 ```
 
-**Folding rule:** for a serial chain, joint `J`'s origin is the transform of the link that
-is `J`'s parent. So build the chain by following `parent` links across both node types,
-then emit one `Joint` per SVA joint whose `origin` comes from its parent link, plus a
-trailing `fixed` joint carrying the final link's transform (`ee_link` above) so the tip
-frame is right. SVA joints have no `child` field — derive it from the link that names the
-joint as its parent.
+**Folding rule — use the uniform mapping.** Every SVA node becomes a `Joint`:
+
+- SVA joint `J` → `Joint(name=J.id, type=J.type, parent=<previous frame>, child=J.id,
+  origin=T(J's parent link), axis=J.axis, limits=deg2rad(J.min/max))`
+- SVA link `L` → `Joint(name=f"{L.id}_offset", type="fixed", parent=<preceding joint id>,
+  child=L.id, origin=T(L))`
+
+SVA joints have no `child` field; this mapping synthesizes one. Verified against
+`ur5e.json` during Task A2 review — it produces `dof == 6`, `chain()[-1].type == "fixed"`,
+`base_link == "base_link"`, `tip_link == "ee_link"`, and an `actuated_joints` order of
+shoulder_pan → shoulder_lift → elbow → wrist_1 → wrist_2 → wrist_3, all against an
+unmodified `_armkit/model.py`.
+
+**Do not instead fold each link into the following joint and append one trailing `fixed`
+joint.** That was this plan's original wording and it is a trap: the last real joint's
+`child` is already `ee_link`, so the trailing joint either reuses `ee_link` as its own
+child — a self-loop, which `chain()` now rejects but which silently hung before the Task A2
+fix — or invents a name like `ee_link_tip`, which breaks `tip_link == "ee_link"`.
+
+**Consequence to expect:** `link_poses` will contain both `<joint_id>` and `<link_id>`
+frames for SVA models. That is fine and arguably desirable (Viam's frame system names joint
+frames too), and A6 is unaffected because it keys off `model.links`.
 
 **Orientations are polymorphic — read the Conventions section's unit table before writing
 any code here.** `orientation.type` selects the representation and its angular unit; the
@@ -944,9 +960,30 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 | `heavy-mesh` | warn | resolved collision mesh over 5 000 triangles |
 | `nonunit-axis` | error | axis that is not unit length after normalization attempt |
 | `dh-format` | warn | `kinematic_param_type: "DH"` — supported but not recommended |
+| `missing-limits` | error | actuated, non-`continuous` joint whose `lower`/`upper` are `None` |
+| `structure` | error | `chain()` raised — branching, cycle, multiple roots, or disconnection |
 
 Print a summary line (`<name>: <n> actuated joints, base <base> -> tip <tip>`), then each
 finding, then `PASS` or `FAIL`.
+
+**Two ordering traps, both found during Task A2 review:**
+
+**`dof`, `base_link`, and `tip_link` are properties that raise.** They each call `chain()`,
+which throws on a branched, cyclic, multi-rooted, or disconnected model. The summary line
+above reads all three *before* any check runs, so on a malformed model it produces an
+uncaught traceback instead of exit 1 with a finding — defeating the whole exit-code
+contract on exactly the inputs armkit exists to catch. Wrap the summary in
+`try/except ValueError` and convert the failure into a `structure` error finding. Also
+compute `chain()` once into a local and reuse it, or a broken model raises four identical
+errors.
+
+**`missing-limits` must be checked before `zero-limits` and `inverted-limits`.** A3 leaves
+`lower = upper = None` for an actuated joint with no `<limit>` element. Measured: `lower ==
+upper` is `True` for `None == None`, so `zero-limits` fires with a misleading diagnosis;
+and `lower > upper` raises `TypeError: '>' not supported between instances of 'NoneType'
+and 'NoneType'`, crashing the CLI. Guard on `is None` first and emit `missing-limits`
+instead. (`continuous` joints are exempt — A3 gives them `±inf`, and both comparisons are
+correctly `False` there.)
 
 - [ ] **Step 5: Run tests**
 
