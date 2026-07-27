@@ -39,10 +39,15 @@ def test_chain_orders_base_to_tip():
     assert m.tip_link == "tip"
 
 
-def test_chain_raises_on_branching():
-    # Covers: `if len(branches) > 1` -> "branching at link ...".
-    # Two joints share the same parent ("base"), so the walk from the
-    # root finds two candidate next-steps at once.
+def test_chain_raises_on_multiple_leaves_without_declared_tip():
+    # CHANGED (Task A3b, Part 2): this scenario used to raise "branching
+    # at link 'base': [...]" because chain() diagnosed branching at the
+    # first fork it walked into. RDK instead reasons about leaves --
+    # verified against RDK v1.0.0 via the probe on a synthetic two-leaf
+    # URDF: "need exactly one end effector, have [finger_r finger_l]".
+    # Branching itself is legal now (see test_chain_allows_branching_
+    # with_declared_tip); it is only an error when there's no declared
+    # tip to disambiguate which leaf is the end effector.
     m = KinematicModel(
         name="t",
         joints=[
@@ -51,8 +56,75 @@ def test_chain_raises_on_branching():
         ],
         links={}, source_format="urdf", source_path="t.urdf",
     )
-    with pytest.raises(ValueError, match="branching at link"):
+    with pytest.raises(ValueError, match=r"need exactly one end effector, have \['l1', 'l2'\]"):
         m.chain()
+
+
+def test_chain_allows_branching_with_declared_tip():
+    # Part 2/3: once a tip is declared, branching elsewhere in the tree
+    # is legal -- chain() just walks root->tip and ignores the sibling
+    # branch. dof still counts the sibling branch's joints (Part 4,
+    # tested in test_dof_counts_branch_joints_not_on_chain).
+    m = KinematicModel(
+        name="t",
+        joints=[
+            rev("j1", "base", "l1"),
+            rev("j2", "base", "l2"),
+        ],
+        links={}, source_format="urdf", source_path="t.urdf",
+        primary_output_frame="l1",
+    )
+    assert [j.name for j in m.chain()] == ["j1"]
+    assert m.tip_link == "l1"
+
+
+def test_dof_counts_branch_joints_not_on_chain():
+    # Part 4: RDK builds its flat input vector via BFS over the WHOLE
+    # frame system, not along the tip path -- sibling-branch joints
+    # still occupy input slots. Verified against RDK v1.0.0 via the
+    # probe on an equivalent branching SVA fixture with output_frames:
+    # DoF=3 for a trunk joint plus one joint on each of two branches,
+    # even though only 2 of those 3 joints are on the declared tip's
+    # chain.
+    m = KinematicModel(
+        name="t",
+        joints=[
+            rev("trunk", "root", "base"),
+            rev("j1", "base", "l1"),
+            rev("j2", "base", "l2"),
+        ],
+        links={}, source_format="urdf", source_path="t.urdf",
+        primary_output_frame="l1",
+    )
+    assert [j.name for j in m.chain()] == ["trunk", "j1"]
+    assert m.dof == 3
+    assert {j.name for j in m.actuated_joints} == {"trunk", "j1", "j2"}
+
+
+def test_declared_tip_not_reachable_raises():
+    m = KinematicModel(
+        name="t",
+        joints=[rev("j1", "base", "l1")],
+        links={}, source_format="urdf", source_path="t.urdf",
+        primary_output_frame="ghost",
+    )
+    with pytest.raises(ValueError, match="declared tip 'ghost' is not reachable"):
+        m.chain()
+
+
+def test_bfs_order_matches_chain_order_for_serial_models():
+    # Part 4's no-op guarantee: for any serial (non-branching) model,
+    # BFS-over-the-whole-tree order must equal the root->tip chain
+    # order, since there's only ever one joint to step to at each link.
+    m = KinematicModel(
+        name="t",
+        joints=[
+            rev("j2", "l1", "tip"),
+            rev("j1", "base", "l1"),
+        ],
+        links={}, source_format="urdf", source_path="t.urdf",
+    )
+    assert [j.name for j in m.actuated_joints] == [j.name for j in m.chain()]
 
 
 def test_chain_raises_on_multiple_roots():

@@ -546,6 +546,56 @@ def test_mimic_non_numeric_multiplier_raises(tmp_path):
         parse_urdf(path)
 
 
+def test_declared_tip_selects_branch(tmp_path):
+    # Part 3: parse_urdf(path, tip=...) stores the declared tip on the
+    # model; branching is legal once a tip is declared (Part 2).
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="palm"/>
+      <link name="finger_l"/><link name="finger_r"/>
+      <joint name="j0" type="revolute">
+        <parent link="base"/><child link="palm"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="jl" type="revolute">
+        <parent link="palm"/><child link="finger_l"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="jr" type="revolute">
+        <parent link="palm"/><child link="finger_r"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    m = parse_urdf(path, tip="finger_l")
+    assert m.primary_output_frame == "finger_l"
+    assert [j.name for j in m.chain()] == ["j0", "jl"]
+    assert m.tip_link == "finger_l"
+    # Verified against RDK v1.0.0 via the probe on an equivalent
+    # branching SVA fixture: DoF counts joints on BOTH branches, not
+    # just the ones on the root->tip path (model.go:150 -- BFS over
+    # the whole frame system, not the tip chain).
+    assert m.dof == 3
+
+
+def test_declared_tip_not_in_model_raises(tmp_path):
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="tip"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="declared tip 'nonexistent' is not a link"):
+        parse_urdf(path, tip="nonexistent")
+
+
 def test_namespaced_root_parses_successfully(tmp_path):
     # Covers Fix 4: a default xmlns on <robot> makes ElementTree report
     # root.tag as "{uri}robot". Before stripping the namespace prefix,

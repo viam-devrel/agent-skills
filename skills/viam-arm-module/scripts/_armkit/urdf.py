@@ -173,10 +173,21 @@ def _parse(path: Path) -> KinematicModel:
     )
 
 
-def parse_urdf(path: str | Path) -> KinematicModel:
+def parse_urdf(path: str | Path, tip: str | None = None) -> KinematicModel:
     path = Path(path)
     try:
-        return _parse(path)
+        model = _parse(path)
+        if tip is not None:
+            if tip not in model.links:
+                leaves = sorted(
+                    {j.child for j in model.joints} - {j.parent for j in model.joints}
+                )
+                raise ValueError(
+                    f"{path}: declared tip {tip!r} is not a link in this model "
+                    f"(available leaves: {leaves})"
+                )
+            model.primary_output_frame = tip
+        return model
     except ValueError:
         raise
     except Exception as e:
