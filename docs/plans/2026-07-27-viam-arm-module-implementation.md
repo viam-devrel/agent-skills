@@ -1320,6 +1320,20 @@ git commit -m "feat(armkit): validate subcommand with kinematics trap checks"
 
 ### Task A8: `armkit.py meshes`
 
+**First, extract `_armkit/report.py`.** A7 review found the seam is now due: `armkit.py`
+grew 260 → 342 lines, and `_report` alone is 64 lines rendering both text and JSON while
+knowing about `rdk_parity` summarization, remedy indentation, pose formatting, and the
+`schema_version`/`contract` fields. A8 (`meshes`) and A9 (`simplify`/`convert`) each need
+the same two-format rendering with different payloads; duplicating it three ways is how
+the JSON schema drifts between subcommands — which matters now that `schema_version: 1`
+is a published promise. Move `_report`, `Finding` rendering, and `_RDK_PARITY_CODES` there
+before adding anything. Drops `armkit.py` to roughly 270 and gives the contract one owner.
+
+**Mesh reference lists already exist.** A7 populates `Link.visual_meshes` and
+`Link.collision_meshes` from the XML (12 lines, no disk access, no trimesh). A6/A8 consume
+those lists rather than re-parsing, and own the actual resolution, `unresolved-mesh`,
+`heavy-mesh`, and trimesh loading.
+
 **Files:**
 - Modify: `skills/viam-arm-module/scripts/armkit.py`
 - Test: `skills/viam-arm-module/scripts/tests/test_cli.py`
