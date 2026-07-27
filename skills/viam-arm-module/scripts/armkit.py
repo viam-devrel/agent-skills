@@ -71,6 +71,14 @@ SVA_NOT_IMPLEMENTED = (
     "task; see _armkit/sva.py). Only .urdf files are implemented today."
 )
 
+# What makes --json safe to extend: new finding `code`s (A6 will add
+# unresolved-mesh/heavy-mesh; A8/A9 will add more) are additive and do not
+# require a consumer update, AS LONG AS consumers switch on `level`
+# (error/warn) for anything they don't recognize, rather than hard-failing
+# on an unknown code. State this explicitly rather than leaving it
+# implicit -- an implicit contract is not one a consumer can rely on.
+_JSON_CONTRACT = "unknown finding `code`s should be handled by `level` (error/warn), not by code"
+
 
 def _usage_error(message: str) -> None:
     """Print `message` and exit 2 -- a usage/environment problem, not a finding
@@ -169,6 +177,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "flag likely unit-scale mistakes, and optionally compute a "
             "forward-kinematics pose at a given joint configuration.\n\n"
             + RDK_DIVERGENCE_NOTE
+            + "\n\n--json contract: " + _JSON_CONTRACT + "."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -291,15 +300,23 @@ def _report(
 
     if args.json:
         payload = {
+            # Bump this on any BREAKING change to this shape (a renamed or
+            # removed key, a changed type). Adding a finding `code` is NOT
+            # breaking -- see "contract" below -- and does not need a bump.
+            "schema_version": 1,
             "file": str(path),
             "summary": summary,
             "findings": [
-                {"level": f.level, "code": f.code, "message": f.message, "remedy": f.remedy}
+                {
+                    "level": f.level, "code": f.code, "joint": f.joint,
+                    "message": f.message, "remedy": f.remedy,
+                }
                 for f in findings
             ],
             "pose": pose_report,
             "verdict": verdict,
             "rdk_parity": rdk_parity,
+            "contract": _JSON_CONTRACT,
         }
         print(json.dumps(payload, indent=2))
     else:

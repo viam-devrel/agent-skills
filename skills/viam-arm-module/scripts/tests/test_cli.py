@@ -362,6 +362,57 @@ def test_validate_json_fail_verdict_matches_exit_code(fixtures):
     assert any(f["code"] == "dof-mismatch" for f in payload["findings"])
 
 
+def test_validate_json_has_schema_version(fixtures):
+    # Fix 3: a top-level schema_version is what makes a NEW top-level key
+    # (A6/A8 will want per-link mesh data) detectable by a consumer -- new
+    # finding codes are already forward-compatible via `level`, but a new
+    # key at this level isn't, without a version to check.
+    r = run("validate", str(fixtures / "two_link.urdf"), "--json")
+    payload = json.loads(r.stdout)
+    assert payload["schema_version"] == 1
+
+
+def test_validate_json_findings_have_nullable_joint_field(fixtures, tmp_path):
+    # Today a consumer has to regex `joint 'shoulder_pan_joint'` out of the
+    # message; check functions already have j.name in hand.
+    path = write_urdf(tmp_path, """
+    <robot name="zerolimit">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="tip"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="0.5" upper="0.5" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    r = run("validate", str(path), "--json")
+    payload = json.loads(r.stdout)
+    zero_limit_findings = [f for f in payload["findings"] if f["code"] == "zero-limits"]
+    assert len(zero_limit_findings) == 1
+    assert zero_limit_findings[0]["joint"] == "j1"
+
+    # A finding with no natural single joint (e.g. dof-mismatch) is
+    # explicitly null, not absent -- the key is always present.
+    r2 = run("validate", str(fixtures / "two_link.urdf"), "--expect-dof", "9", "--json")
+    payload2 = json.loads(r2.stdout)
+    dof_findings = [f for f in payload2["findings"] if f["code"] == "dof-mismatch"]
+    assert dof_findings[0]["joint"] is None
+
+
+def test_validate_json_states_the_code_forward_compatibility_contract(fixtures):
+    r = run("validate", str(fixtures / "two_link.urdf"), "--json")
+    payload = json.loads(r.stdout)
+    assert "contract" in payload
+    assert "level" in payload["contract"]
+
+
+def test_help_states_the_code_forward_compatibility_contract():
+    r = run("validate", "--help")
+    assert r.returncode == 0
+    assert "level" in r.stdout
+
+
 def test_validate_json_has_no_generic_note_field(fixtures):
     # Replaced by the per-file "rdk_parity" field (Fix 2) -- a fixed prose
     # blob is not something a consumer can act on; see

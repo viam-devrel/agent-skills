@@ -36,6 +36,7 @@ class Finding:
     level: str   # "error" | "warn"
     code: str
     message: str
+    joint: str | None = None    # the single joint this finding is about, if any
     remedy: str | None = None   # armkit-authored fix suggestion, never RDK's own wording
 
     @property
@@ -63,22 +64,26 @@ def check_joint_limits(actuated: list[Joint]) -> list[Finding]:
             findings.append(Finding(
                 "warn", "continuous-joint",
                 f"joint {j.name!r} is continuous; RDK gives it infinite limits",
+                joint=j.name,
             ))
             continue
         if j.lower is None or j.upper is None:
             findings.append(Finding(
                 "error", "missing-limits",
                 f"joint {j.name!r} is actuated but declares no <limit>",
+                joint=j.name,
             ))
         elif j.lower == j.upper:
             findings.append(Finding(
                 "error", "zero-limits",
                 f"joint {j.name!r} has zero-width limits (lower == upper == {j.lower})",
+                joint=j.name,
             ))
         elif j.lower > j.upper:
             findings.append(Finding(
                 "error", "inverted-limits",
                 f"joint {j.name!r} has inverted limits (lower={j.lower} > upper={j.upper})",
+                joint=j.name,
             ))
     return findings
 
@@ -104,6 +109,7 @@ def check_unit_scale(model: KinematicModel, chain: list[Joint]) -> list[Finding]
                 "warn", "unit-scale",
                 f"joint {biggest.name!r} translates {d:.1f} mm "
                 f"(> {UNIT_SCALE_MAX_JOINT_MM:.0f} mm) -- check for a meters/millimeters mixup",
+                joint=biggest.name,
             ))
 
     reach = sum(float(np.linalg.norm(j.origin[:3, 3])) for j in chain)
@@ -168,6 +174,7 @@ def check_rdk_parity_risks(model: KinematicModel) -> list[Finding]:
                 "warn", "missing-origin",
                 f"joint {j.name!r} has no <origin>; RDK v1.0.0 panics on this "
                 "(armkit follows the URDF spec and defaults to identity)",
+                joint=j.name,
             ))
 
     return findings
@@ -196,5 +203,6 @@ def check_at_bounds(actuated: list[Joint], values: list[float]) -> list[Finding]
             findings.append(Finding(
                 "error", "input-out-of-bounds",
                 f"--at value {v} for joint {j.name!r} is outside its limits [{j.lower}, {j.upper}]",
+                joint=j.name,
             ))
     return findings
