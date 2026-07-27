@@ -79,6 +79,13 @@ corpus scan expecting 102 accepted / 30 end-effector / 22 jointless / 1 undeclar
 across the 155 real files. A changed verdict is a **finding, not a test to update** — it
 means RDK's behavior moved and armkit must follow deliberately.
 
+**The same rule applies to `viam-sdk` upgrades.** `transforms.py`'s `order="F"` reshape
+depends on an *undocumented* buffer layout in a vendored native library whose own docstring
+claims the opposite. An SDK upgrade that "fixes" the buffer order is the same class of
+event as an RDK verdict change, and must be treated as a finding rather than a test to
+update. `test_transforms.py` pins the layout; if it fails after an upgrade, investigate
+before touching it.
+
 **Corpus-scan trap:** the topology checks are lazy properties. A scan that only calls
 `parse_urdf` without evaluating `m.dof` never runs them, and 52 rejects silently
 reclassify as accepts.
@@ -176,6 +183,20 @@ orientation types include Viam's own orientation-vector format.
 > parity tests likely pass because they compare via quaternion, which carries no layout.
 > Verified against released `viam-sdk 0.79.2` (FFI-backed) — not a stale-checkout artifact.
 > **This belongs in `sdk-gaps.md` (task B1) as a genuine, filable SDK bug.**
+
+**Dependency cost of `viam-sdk`, measured during A4b review and accepted deliberately:**
+13 → 25 packages, venv 71 MB (the `viam` package alone is 20.1 MB), pulling the full gRPC
+stack plus `pymongo` and `dnspython` onto the offline `validate` path. First-run PEP 723
+download goes from ~20 MB to ~90 MB, cached thereafter. Recorded so a future reader knows
+this was weighed rather than drifted into.
+
+**Platform support** (resolved via `uv pip compile --python-platform`): Linux glibc and
+musl on x86_64/aarch64/armv7 (Raspberry Pi, Alpine), macOS x86_64/arm64, Windows x64.
+**Windows ARM64 fails** — no matching wheel and no sdist, so it fails at *dependency
+resolution before Python starts*, which armkit cannot catch or explain. There is no
+degrade path by design: `transforms.py` imports `viam.spatialmath` at module scope and
+`urdf.py`'s `_origin()` calls `rpy_to_matrix` per joint, so no viam-sdk means no parsing
+at all, not even topology checks.
 
 **Do NOT use the `referenceframe` FFI in `rust-utils`.** The local branch
 `design/referenceframe-fk-parsing` implements `rf_model_from_bytes`, `rf_model_dof`,
@@ -1248,6 +1269,21 @@ primitives and references no meshes, so expect no `unresolved-mesh` findings her
 so a missing or wrong entry in `armkit.py`'s PEP 723 `dependencies` block would pass every
 test and still break the real `uv run armkit.py` user path. Add a test that shells out
 with `--isolated` so this is enforced rather than remembered.
+
+**Diagnose a native-library failure as an environment problem, not an armkit bug.**
+Measured during A4b review: when the `viam-sdk` wheel installs but `libviam_rust_utils`
+fails to `dlopen` (old glibc under a manylinux wheel, broken install), the error-handling
+contract's catch-all reports `internal error while parsing <file> (OSError: ...) -- this is
+an armkit bug`, telling the user to file a bug about their own environment. Special-case it
+in `armkit.py`'s top-level handler and **exit 2** (usage/environment), not 1 — it is not a
+finding about the user's file:
+
+```python
+except ValueError as e:
+    if "libviam_rust_utils" in str(e):
+        sys.exit("armkit could not load viam-sdk's native library on this platform.\n"
+                 "Supported: Linux (glibc/musl) x86_64/aarch64/armv7, macOS x86_64/arm64, Windows x64.")
+```
 
 **Do not add a blanket `timeout = N` under `[tool.pytest.ini_options]`.** On a cold uv
 cache the `--isolated` test downloads and resolves numpy, trimesh, and pycollada, which
