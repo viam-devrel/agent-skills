@@ -58,7 +58,7 @@ class KinematicModel:
         return len(self.actuated_joints)
 
     def chain(self) -> list[Joint]:
-        """Joints ordered base to tip. Raises on branching or disconnection."""
+        """Joints ordered base to tip. Raises on missing/multiple roots, branching, cycles, or disconnection."""
         by_parent = {}
         for j in self.joints:
             by_parent.setdefault(j.parent, []).append(j)
