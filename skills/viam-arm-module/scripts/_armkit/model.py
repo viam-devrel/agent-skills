@@ -261,14 +261,23 @@ class KinematicModel:
         chain() can read vals[j.name] unconditionally, with no ordering
         or mimic-resolution knowledge of its own).
         """
-        actuated = self.actuated_joints
+        # One BFS walk, reused for both the actuated subset (to line up
+        # with `inputs`) and the mimic/fixed fill below -- not one walk
+        # via actuated_joints plus a second, separate _bfs_all_joints()
+        # call. _require_resolvable_tip() is still called directly (not
+        # just via actuated_joints) so an ambiguous-tip model still
+        # raises here, matching actuated_joints/dof/chain().
+        order = self._bfs_all_joints()
+        self._require_resolvable_tip()
+        actuated = [j for j in order if j.actuated and j.mimic is None]
+
         if len(inputs) != len(actuated):
             raise ValueError(
                 f"joint_values expected {len(actuated)} input value(s) "
                 f"(dof={len(actuated)}), got {len(inputs)}"
             )
         vals: dict[str, float] = {j.name: float(v) for j, v in zip(actuated, inputs)}
-        for j in self._bfs_all_joints():
+        for j in order:
             if j.name in vals:
                 continue
             if j.mimic is not None:
