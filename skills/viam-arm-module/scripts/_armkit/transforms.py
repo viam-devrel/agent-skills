@@ -57,3 +57,54 @@ def axis_angle_to_matrix(axis: np.ndarray, angle: float) -> np.ndarray:
     """
     elements = AxisAngle(axis[0], axis[1], axis[2], angle).to_quaternion().to_rotation_matrix().elements
     return np.array(elements).reshape(3, 3, order="F")
+
+
+def matrix_to_wxyz_quaternion(r: np.ndarray) -> np.ndarray:
+    """3x3 rotation matrix -> unit quaternion (w, x, y, z), via Shepperd's
+    method: pick the numerically stable branch based on the trace and the
+    largest diagonal entry, avoiding the sqrt-of-a-small-or-negative-number
+    issue a single naive formula runs into near 180-degree rotations.
+
+    Plain numpy, not a round-trip through viam.spatialmath's RotationMatrix
+    -- that class's CONSTRUCTOR direction (Python floats -> native buffer)
+    is unverified, whereas this module's other two functions only ever use
+    its READ direction (proven column-major, pinned by
+    test_viam_spatialmath_rotation_matrix_elements_are_column_major).
+    Avoiding a second, differently-unverified native-buffer layout in
+    output a human or an agent reads directly was a deliberate call, not an
+    oversight -- see armkit.py validate's --at pose output, the only
+    caller that needs this direction at all.
+
+    Previously implemented twice, independently, by armkit.py's --at pose
+    output and tests/test_fk.py's assert_pose_matches -- they agreed
+    (verified over 4000 random rotations, worst 1-|dot| = 4.44e-16), but
+    that agreement was not being tested: a regression in one copy had
+    nothing to catch it. Unified here, in the one module whose stated
+    purpose is keeping rotation constructions in one place.
+    """
+    trace = np.trace(r)
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (r[2, 1] - r[1, 2]) * s
+        y = (r[0, 2] - r[2, 0]) * s
+        z = (r[1, 0] - r[0, 1]) * s
+    elif r[0, 0] > r[1, 1] and r[0, 0] > r[2, 2]:
+        s = 2.0 * np.sqrt(1.0 + r[0, 0] - r[1, 1] - r[2, 2])
+        w = (r[2, 1] - r[1, 2]) / s
+        x = 0.25 * s
+        y = (r[0, 1] + r[1, 0]) / s
+        z = (r[0, 2] + r[2, 0]) / s
+    elif r[1, 1] > r[2, 2]:
+        s = 2.0 * np.sqrt(1.0 + r[1, 1] - r[0, 0] - r[2, 2])
+        w = (r[0, 2] - r[2, 0]) / s
+        x = (r[0, 1] + r[1, 0]) / s
+        y = 0.25 * s
+        z = (r[1, 2] + r[2, 1]) / s
+    else:
+        s = 2.0 * np.sqrt(1.0 + r[2, 2] - r[0, 0] - r[1, 1])
+        w = (r[1, 0] - r[0, 1]) / s
+        x = (r[0, 2] + r[2, 0]) / s
+        y = (r[1, 2] + r[2, 1]) / s
+        z = 0.25 * s
+    return np.array([w, x, y, z])

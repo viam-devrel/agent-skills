@@ -40,8 +40,6 @@ import re
 import sys
 from pathlib import Path
 
-import numpy as np
-
 from _armkit.checks import (
     Finding,
     check_at_bounds,
@@ -51,6 +49,7 @@ from _armkit.checks import (
     check_unit_scale,
 )
 from _armkit.fk import forward_kinematics
+from _armkit.transforms import matrix_to_wxyz_quaternion
 from _armkit.urdf import parse_urdf
 
 # RDK's own wording for the multi-leaf case (referenceframe's
@@ -79,6 +78,13 @@ SVA_NOT_IMPLEMENTED = (
 # implicit -- an implicit contract is not one a consumer can rely on.
 _JSON_CONTRACT = "unknown finding `code`s should be handled by `level` (error/warn), not by code"
 
+# For a tool distributed by copy-paste inside a skill (no package manager
+# entry, no `pip show`), this string is what makes a bug report actionable
+# -- "which armkit" has no other answer. Bump manually; there is no
+# packaging metadata to derive it from since armkit.py ships as a single
+# PEP 723 file, not an installed distribution.
+ARMKIT_VERSION = "0.1.0"
+
 
 def _usage_error(message: str) -> None:
     """Print `message` and exit 2 -- a usage/environment problem, not a finding
@@ -89,46 +95,6 @@ def _usage_error(message: str) -> None:
     """
     print(message, file=sys.stderr)
     sys.exit(2)
-
-
-def _matrix_to_wxyz_quaternion(r: np.ndarray) -> tuple[float, float, float, float]:
-    """3x3 rotation matrix -> unit quaternion (w, x, y, z).
-
-    Plain numpy (Shepperd's method), not a round-trip through
-    viam.spatialmath's RotationMatrix -- that class's constructor direction
-    (Python floats -> native buffer) is unverified here, and _armkit/
-    transforms.py already found the READ direction of that same FFI class
-    silently transposed unless reshaped `order="F"` (see its "Layout trap"
-    docstring). This formula has no native-buffer-layout ambiguity to get
-    wrong: it operates only on the already-verified numpy rotation matrix
-    fk.py produces.
-    """
-    trace = np.trace(r)
-    if trace > 0:
-        s = 0.5 / np.sqrt(trace + 1.0)
-        w = 0.25 / s
-        x = (r[2, 1] - r[1, 2]) * s
-        y = (r[0, 2] - r[2, 0]) * s
-        z = (r[1, 0] - r[0, 1]) * s
-    elif r[0, 0] > r[1, 1] and r[0, 0] > r[2, 2]:
-        s = 2.0 * np.sqrt(1.0 + r[0, 0] - r[1, 1] - r[2, 2])
-        w = (r[2, 1] - r[1, 2]) / s
-        x = 0.25 * s
-        y = (r[0, 1] + r[1, 0]) / s
-        z = (r[0, 2] + r[2, 0]) / s
-    elif r[1, 1] > r[2, 2]:
-        s = 2.0 * np.sqrt(1.0 + r[1, 1] - r[0, 0] - r[2, 2])
-        w = (r[0, 2] - r[2, 0]) / s
-        x = (r[0, 1] + r[1, 0]) / s
-        y = 0.25 * s
-        z = (r[1, 2] + r[2, 1]) / s
-    else:
-        s = 2.0 * np.sqrt(1.0 + r[2, 2] - r[0, 0] - r[1, 1])
-        w = (r[1, 0] - r[0, 1]) / s
-        x = (r[0, 2] + r[2, 0]) / s
-        y = (r[1, 2] + r[2, 1]) / s
-        z = 0.25 * s
-    return float(w), float(x), float(y), float(z)
 
 
 def _structure_finding(message: str) -> Finding:
@@ -167,7 +133,16 @@ def _build_parser() -> argparse.ArgumentParser:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--version", action="version", version=f"armkit {ARMKIT_VERSION}",
+    )
+    # NOT required: a bare `armkit.py` (no subcommand at all) should print
+    # help and exit 0, not argparse's usage error -- see main()'s
+    # `if args.command is None` branch. A recognized subcommand missing its
+    # OWN required arguments (e.g. `validate` with no file) still exits 2;
+    # that is argparse's ordinary positional-argument handling and is
+    # unaffected by this.
+    subparsers = parser.add_subparsers(dest="command")
 
     validate_parser = subparsers.add_parser(
         "validate",
@@ -240,7 +215,17 @@ def cmd_validate(args: argparse.Namespace) -> int:
     tip = chain[-1].child
     actuated = model.actuated_joints
     dof = len(actuated)
-    summary = {"name": model.name, "dof": dof, "base": base, "tip": tip}
+    # model.primary_output_frame is None exactly when --tip was not given:
+    # parse_urdf only sets it from an explicit `tip=` argument. A model can
+    # have exactly one leaf and still not be the flange a user expects
+    # (e.g. a sensor frame ahead of the "real" tool frame) -- without this,
+    # nothing distinguishes "you told armkit the tip" from "armkit picked
+    # the only leaf it found".
+    tip_auto_selected = model.primary_output_frame is None
+    summary = {
+        "name": model.name, "dof": dof, "base": base, "tip": tip,
+        "tip_auto_selected": tip_auto_selected,
+    }
 
     findings: list[Finding] = []
     findings += check_dof(actuated, args.expect_dof)
@@ -260,7 +245,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
         pose = forward_kinematics(model, at_values)
         point_mm = [float(x) for x in pose[:3, 3]]
-        quat_wxyz = list(_matrix_to_wxyz_quaternion(pose[:3, :3]))
+        quat_wxyz = [float(q) for q in matrix_to_wxyz_quaternion(pose[:3, :3])]
         pose_report = {"point_mm": point_mm, "quat_wxyz": quat_wxyz}
 
     # RDK-parity risk findings (Fix 2) are added only once nothing else has
@@ -321,8 +306,12 @@ def _report(
         print(json.dumps(payload, indent=2))
     else:
         if summary is not None:
+            tip_note = (
+                " (auto-selected: only leaf; override with --tip)"
+                if summary["tip_auto_selected"] else ""
+            )
             print(f"{summary['name']}: {summary['dof']} actuated joints, "
-                  f"base {summary['base']} -> tip {summary['tip']}")
+                  f"base {summary['base']} -> tip {summary['tip']}{tip_note}")
         else:
             print(f"{path}: could not determine model structure")
         for f in findings:
@@ -343,6 +332,9 @@ def _report(
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help()
+        return 0
     return args.func(args)
 
 

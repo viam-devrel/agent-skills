@@ -444,9 +444,60 @@ def test_validate_unknown_extension_exits_2(tmp_path):
     assert r.returncode == 2
 
 
-def test_validate_missing_arguments_exits_2():
+def test_bare_invocation_prints_help_and_exits_0():
+    # A tool distributed by copy-paste inside a skill has no shell
+    # completion or man page to fall back on -- a bare invocation should
+    # be as helpful as `--help`, not an argparse usage error.
     r = run()
+    assert r.returncode == 0
+    assert "usage:" in r.stdout
+    assert "validate" in r.stdout
+
+
+def test_validate_with_missing_positional_still_exits_2(fixtures):
+    # A recognized subcommand missing its REQUIRED positional argument is
+    # still a genuine usage error -- only the fully-bare invocation above
+    # changed behavior.
+    r = run("validate")
     assert r.returncode == 2
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: --version, and a signal when armkit auto-selected the tip
+# ---------------------------------------------------------------------------
+
+def test_version_flag_prints_a_version_and_exits_0():
+    r = run("--version")
+    assert r.returncode == 0
+    assert "armkit" in r.stdout
+
+
+def test_auto_selected_tip_is_signaled_when_tip_not_given(fixtures):
+    # two_link.urdf has exactly one leaf ("tip") and no declared --tip.
+    # armkit auto-selects it -- a user expecting a DIFFERENT leaf (a model
+    # can have exactly one leaf that still isn't the flange someone
+    # expects, e.g. a sensor frame ahead of the "real" tool frame) has no
+    # signal today that armkit chose rather than confirmed anything.
+    r = run("validate", str(fixtures / "two_link.urdf"))
+    assert r.returncode == 0
+    assert "auto-selected" in r.stdout
+    assert "--tip" in r.stdout
+
+
+def test_explicit_tip_is_not_signaled_as_auto_selected(fixtures):
+    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "finger_l")
+    assert r.returncode == 0
+    assert "auto-selected" not in r.stdout
+
+
+def test_json_summary_reports_tip_auto_selected(fixtures):
+    r_auto = run("validate", str(fixtures / "two_link.urdf"), "--json")
+    payload_auto = json.loads(r_auto.stdout)
+    assert payload_auto["summary"]["tip_auto_selected"] is True
+
+    r_explicit = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "finger_l", "--json")
+    payload_explicit = json.loads(r_explicit.stdout)
+    assert payload_explicit["summary"]["tip_auto_selected"] is False
 
 
 # ---------------------------------------------------------------------------

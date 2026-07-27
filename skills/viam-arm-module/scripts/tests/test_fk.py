@@ -9,7 +9,8 @@ its assertion so a future re-run can reproduce it.
 Point comparisons are exact-ish (RDK prints 9 decimals of millimeters).
 Orientation comparisons go through a quaternion built from our rotation
 matrix, since q and -q represent the same rotation -- see
-`_quaternion_from_matrix` / `assert_pose_matches` below.
+`_armkit.transforms.matrix_to_wxyz_quaternion` / `assert_pose_matches`
+below.
 """
 from __future__ import annotations
 
@@ -17,47 +18,17 @@ import numpy as np
 import pytest
 
 from _armkit.fk import forward_kinematics, joint_transform, link_poses
-from _armkit.transforms import axis_angle_to_matrix
+from _armkit.transforms import axis_angle_to_matrix, matrix_to_wxyz_quaternion
 from _armkit.urdf import parse_urdf
 
 POINT_TOL_MM = 1e-6
 
-
-def _quaternion_from_matrix(r: np.ndarray) -> np.ndarray:
-    """3x3 rotation matrix -> unit quaternion (w, x, y, z).
-
-    Shepperd's method: pick the numerically stable branch based on the
-    trace and the largest diagonal entry, avoiding the sqrt-of-a-small-
-    or-negative-number issue a single naive formula runs into near
-    180-degree rotations.
-    """
-    m = r
-    trace = m[0, 0] + m[1, 1] + m[2, 2]
-    if trace > 0:
-        s = np.sqrt(trace + 1.0) * 2.0
-        w = 0.25 * s
-        x = (m[2, 1] - m[1, 2]) / s
-        y = (m[0, 2] - m[2, 0]) / s
-        z = (m[1, 0] - m[0, 1]) / s
-    elif m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
-        s = np.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2.0
-        w = (m[2, 1] - m[1, 2]) / s
-        x = 0.25 * s
-        y = (m[0, 1] + m[1, 0]) / s
-        z = (m[0, 2] + m[2, 0]) / s
-    elif m[1, 1] > m[2, 2]:
-        s = np.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2.0
-        w = (m[0, 2] - m[2, 0]) / s
-        x = (m[0, 1] + m[1, 0]) / s
-        y = 0.25 * s
-        z = (m[1, 2] + m[2, 1]) / s
-    else:
-        s = np.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2.0
-        w = (m[1, 0] - m[0, 1]) / s
-        x = (m[0, 2] + m[2, 0]) / s
-        y = (m[1, 2] + m[2, 1]) / s
-        z = 0.25 * s
-    return np.array([w, x, y, z])
+# armkit.py's --at pose output uses this SAME function (see
+# tests/test_transforms.py for its own dedicated tests) -- previously this
+# module carried an independent copy that happened to agree with the CLI's,
+# but a regression in either copy had nothing to catch it. Aliased rather
+# than renamed at every call site below.
+_quaternion_from_matrix = matrix_to_wxyz_quaternion
 
 
 def assert_pose_matches(pose: np.ndarray, expected_point_mm, expected_quat, point_tol=POINT_TOL_MM, quat_tol=1e-6):

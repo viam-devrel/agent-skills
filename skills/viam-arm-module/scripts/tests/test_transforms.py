@@ -222,3 +222,58 @@ def test_viam_spatialmath_rotation_matrix_elements_are_column_major():
     # revisited before anything else in this file is trusted.
     assert np.allclose(row_major, expected.T, atol=1e-9)
     assert not np.allclose(row_major, expected, atol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# matrix_to_wxyz_quaternion (Fix 4, A7 review): armkit.py's --at pose output
+# and tests/test_fk.py's assert_pose_matches used to each carry an
+# independently-written copy of this Shepperd's-method conversion. They
+# agreed (verified over 4000 random rotations, worst 1-|dot| = 4.44e-16),
+# but a regression in the CLI's copy had nothing to catch it -- the test
+# helper structurally could not, since it was a DIFFERENT implementation.
+# Unified here, in the one module whose stated purpose is keeping rotation
+# constructions in one place; both callers now import this.
+# ---------------------------------------------------------------------------
+
+from _armkit.transforms import matrix_to_wxyz_quaternion
+
+
+def test_matrix_to_wxyz_quaternion_identity():
+    q = matrix_to_wxyz_quaternion(np.eye(3))
+    assert np.allclose(q, [1.0, 0.0, 0.0, 0.0], atol=1e-9)
+
+
+@pytest.mark.parametrize("axis,expected_quat,label", [
+    (np.array([1.0, 0.0, 0.0]), [0.0, 1.0, 0.0, 0.0], "x"),
+    (np.array([0.0, 1.0, 0.0]), [0.0, 0.0, 1.0, 0.0], "y"),
+    (np.array([0.0, 0.0, 1.0]), [0.0, 0.0, 0.0, 1.0], "z"),
+])
+def test_matrix_to_wxyz_quaternion_180_degree_rotations(axis, expected_quat, label):
+    # Exercises all four branches of Shepperd's method: a 180-degree turn
+    # about X/Y/Z makes m[0,0]/m[1,1]/neither diagonal entry dominate,
+    # taking the trace<=0 branches a near-identity rotation never reaches.
+    r = axis_angle_to_matrix(axis, np.pi)
+    q = matrix_to_wxyz_quaternion(r)
+    dot = float(np.dot(q, np.array(expected_quat)))
+    assert abs(abs(dot) - 1.0) < 1e-6, (label, q, expected_quat, dot)
+
+
+@pytest.mark.parametrize("seed", range(50))
+def test_matrix_to_wxyz_quaternion_round_trips_random_rotations(seed):
+    # Broad regression net: for an arbitrary rotation, converting to a
+    # quaternion and back to a matrix (via axis_angle_to_matrix on the
+    # quaternion's own axis-angle form) must reproduce the original matrix.
+    rng = np.random.default_rng(seed)
+    axis = rng.normal(size=3)
+    axis /= np.linalg.norm(axis)
+    angle = rng.uniform(-np.pi, np.pi)
+    r = axis_angle_to_matrix(axis, angle)
+    q = matrix_to_wxyz_quaternion(r)
+    assert np.isclose(np.linalg.norm(q), 1.0, atol=1e-9)
+    w, x, y, z = q
+    reconstructed = np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ])
+    assert np.allclose(reconstructed, r, atol=1e-9), (r, reconstructed)
