@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .model import Joint, KinematicModel, Link
+from .model import Joint, KinematicModel, Link, Mimic
 from .transforms import M_TO_MM, rpy_to_matrix
 
 # Joint types this toolkit knows how to interpret. URDF also defines
@@ -127,18 +127,45 @@ def _parse(path: Path) -> KinematicModel:
             if jtype == "prismatic":
                 lower, upper = lower * M_TO_MM, upper * M_TO_MM
 
+        mimic_elem = je.find("mimic")
+        mimic = None
+        if mimic_elem is not None:
+            source = mimic_elem.get("joint")
+            if not source:
+                raise ValueError(f"{context} has a <mimic> element missing a 'joint' attribute")
+            try:
+                multiplier = float(mimic_elem.get("multiplier", 1.0))
+            except ValueError as e:
+                raise ValueError(f"{context} has a non-numeric mimic 'multiplier' ({e})") from e
+            try:
+                offset = float(mimic_elem.get("offset", 0.0))
+            except ValueError as e:
+                raise ValueError(f"{context} has a non-numeric mimic 'offset' ({e})") from e
+            mimic = Mimic(source=source, multiplier=multiplier, offset=offset)
+            # RDK zeroes a mimic joint's own limits (model_urdf.go:191):
+            # they're meaningless once the source joint's limits govern.
+            lower, upper = 0.0, 0.0
+
         joints.append(Joint(
             name=jname, type=jtype,
             parent=parent_elem.get("link"),
             child=child_elem.get("link"),
             origin=_origin(je.find("origin"), context),
             axis=axis, lower=lower, upper=upper,
+            mimic=mimic,
         ))
 
     for j in joints:
         for role, ln in (("parent", j.parent), ("child", j.child)):
             if ln not in links:
                 raise ValueError(f"{path}: joint {j.name!r} names {role} link {ln!r}, which is not declared")
+
+    joint_names = {j.name for j in joints}
+    for j in joints:
+        if j.mimic is not None and j.mimic.source not in joint_names:
+            raise ValueError(
+                f"{path}: joint {j.name!r} mimics {j.mimic.source!r}, which is not declared"
+            )
 
     return KinematicModel(
         name=root.get("name", path.stem), joints=joints, links=links,

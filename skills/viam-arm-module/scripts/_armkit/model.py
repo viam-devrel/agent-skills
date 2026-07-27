@@ -18,6 +18,20 @@ ACTUATED_TYPES = {"revolute", "continuous", "prismatic"}
 
 
 @dataclass(eq=False)
+class Mimic:
+    """A mimic relationship: this joint's value = multiplier * source's + offset.
+
+    RDK derives a mimic joint's position at runtime rather than giving it
+    its own input slot, so a joint carrying this is excluded from
+    actuated_joints/dof even though it is a real joint in the tree and
+    still contributes a transform.
+    """
+    source: str                 # name of the joint this one mimics
+    multiplier: float = 1.0
+    offset: float = 0.0
+
+
+@dataclass(eq=False)
 class Joint:
     name: str
     type: str
@@ -27,6 +41,7 @@ class Joint:
     axis: np.ndarray | None     # unit 3-vector, None for fixed
     lower: float | None         # radians (or mm for prismatic)
     upper: float | None
+    mimic: Mimic | None = None
 
     @property
     def actuated(self) -> bool:
@@ -51,7 +66,10 @@ class KinematicModel:
 
     @property
     def actuated_joints(self) -> list[Joint]:
-        return [j for j in self.chain() if j.actuated]
+        # Mimic joints are excluded (Part 1): they're real joints in the
+        # tree and still contribute a transform, they just don't consume
+        # an input slot -- RDK derives their value at runtime instead.
+        return [j for j in self.chain() if j.actuated and j.mimic is None]
 
     @property
     def dof(self) -> int:

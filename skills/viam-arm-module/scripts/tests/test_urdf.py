@@ -450,6 +450,102 @@ def test_joint_referencing_undeclared_child_link_raises(tmp_path):
         parse_urdf(path)
 
 
+def test_mimic_joint_excluded_from_dof(fixtures):
+    # Measured against RDK v1.0.0 via the Go probe (referenceframe.
+    # KinematicModelFromFile): this file gives DoF=2, because joint3
+    # mimics joint1 and RDK derives its value at runtime rather than
+    # giving it its own input slot. armkit previously reported DoF=3,
+    # a live correctness bug -- mimic joints are still real joints in
+    # the tree (they still contribute a transform) but must not consume
+    # an input slot.
+    m = parse_urdf(fixtures / "test_mimic_serial.urdf")
+    assert m.dof == 2
+    assert [j.name for j in m.actuated_joints] == ["joint1", "joint2"]
+    # The mimic joint is still present in the full joint list/tree...
+    assert [j.name for j in m.chain()] == ["base_joint", "joint1", "joint2", "joint3"]
+    joint3 = next(j for j in m.chain() if j.name == "joint3")
+    assert joint3.mimic is not None
+    assert joint3.mimic.source == "joint1"
+    assert joint3.mimic.multiplier == -1.0
+    assert joint3.mimic.offset == 0.0
+    # ...but RDK zeroes a mimic joint's own limits (model_urdf.go:191)
+    # since the source joint's limits govern; armkit matches that.
+    assert joint3.lower == 0.0
+    assert joint3.upper == 0.0
+
+
+def test_mimic_defaults_multiplier_and_offset(tmp_path):
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="mid"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="mid"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="revolute">
+        <parent link="mid"/><child link="tip"/>
+        <axis xyz="0 0 1"/>
+        <mimic joint="j1"/>
+      </joint>
+    </robot>
+    """)
+    m = parse_urdf(path)
+    j2 = next(j for j in m.chain() if j.name == "j2")
+    assert j2.mimic.multiplier == 1.0
+    assert j2.mimic.offset == 0.0
+
+
+def test_mimic_referencing_undeclared_joint_raises(tmp_path):
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="tip"/>
+        <axis xyz="0 0 1"/>
+        <mimic joint="ghost_joint"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="mimics 'ghost_joint', which is not declared"):
+        parse_urdf(path)
+
+
+def test_mimic_missing_joint_attribute_raises(tmp_path):
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="tip"/>
+        <axis xyz="0 0 1"/>
+        <mimic multiplier="1.0"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="<mimic> element missing a 'joint' attribute"):
+        parse_urdf(path)
+
+
+def test_mimic_non_numeric_multiplier_raises(tmp_path):
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="mid"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="mid"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="revolute">
+        <parent link="mid"/><child link="tip"/>
+        <axis xyz="0 0 1"/>
+        <mimic joint="j1" multiplier="abc"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="non-numeric mimic 'multiplier'"):
+        parse_urdf(path)
+
+
 def test_namespaced_root_parses_successfully(tmp_path):
     # Covers Fix 4: a default xmlns on <robot> makes ElementTree report
     # root.tag as "{uri}robot". Before stripping the namespace prefix,
