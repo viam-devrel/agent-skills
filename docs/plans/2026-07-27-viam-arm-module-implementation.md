@@ -55,7 +55,10 @@ today and which are manual.
 
 ### Task A0: Promote the Go probe into the repo
 
-**Files:** create `skills/viam-arm-module/scripts/rdkprobe/{main.go,go.mod,README.md}`
+**Files:** create `tools/rdkprobe/{main.go,go.mod,go.sum,README.md}` — at the **repo root**,
+deliberately *not* under `skills/`. Anything under `skills/viam-arm-module/` ships to every
+user who installs the skill via the plugin symlink, and this is a 91 KB Go module no end
+user runs.
 
 The probe is now load-bearing: it is the parity oracle *and* A4's FK oracle, and it
 currently lives in a session-scoped scratchpad. If it vanishes, the next person re-derives
