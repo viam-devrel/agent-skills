@@ -221,7 +221,16 @@ def _parse(path: Path) -> KinematicModel:
                 f'{path}: mimic joint references non-existent source joint: '
                 f'joint "{j.name}" references source "{current}" which has no DoF'
             )
-        j.mimic = Mimic(source=current, multiplier=composed_multiplier, offset=composed_offset)
+        # Replace with the composed (ultimate-source) triple for
+        # computation, but carry the ORIGINAL as-authored triple forward
+        # unchanged -- it's what the file actually said, and a report
+        # about this joint should say that, not the collapsed form.
+        j.mimic = Mimic(
+            source=current, multiplier=composed_multiplier, offset=composed_offset,
+            declared_source=j.mimic.declared_source,
+            declared_multiplier=j.mimic.declared_multiplier,
+            declared_offset=j.mimic.declared_offset,
+        )
 
     return KinematicModel(
         name=root.get("name", path.stem), joints=joints, links=links,

@@ -27,10 +27,44 @@ class Mimic:
     its own input slot, so a joint carrying this is excluded from
     actuated_joints/dof even though it is a real joint in the tree and
     still contributes a transform (see KinematicModel._bfs_all_joints).
+
+    `source`/`multiplier`/`offset` are the COMPOSED values -- for a
+    mimic-of-a-mimic, urdf.py's resolution walk collapses the chain down
+    to a single hop against the ultimate (non-mimic) source, so these
+    are what joint_values() uses for computation and always name a real
+    actuated joint, never another mimic.
+
+    `declared_source`/`declared_multiplier`/`declared_offset` are the
+    AS-AUTHORED values -- what the <mimic joint="..." multiplier="..."
+    offset="..."/> element in the file actually said, untouched by
+    composition. A future report about a mimic joint should name
+    `declared_source`, not `source`: composition is correct for FK but
+    would otherwise print a source (and a float-noise multiplier/offset)
+    the user never wrote and the file doesn't contain.
+
+    For a joint that directly mimics a non-mimic joint (the common,
+    single-hop case), the two triples are identical.
     """
-    source: str                 # name of the joint this one mimics
+    source: str                 # name of the joint this one mimics, post-composition
     multiplier: float = 1.0
     offset: float = 0.0
+    declared_source: str | None = None
+    declared_multiplier: float | None = None
+    declared_offset: float | None = None
+
+    def __post_init__(self) -> None:
+        # Default the as-authored triple to the given (source, multiplier,
+        # offset) -- correct for the common case where a Mimic is built
+        # directly from the file and hasn't been composed yet. The
+        # composition walk in urdf.py passes declared_* explicitly when
+        # it replaces source/multiplier/offset with the composed form,
+        # so the as-authored triple survives that replacement unchanged.
+        if self.declared_source is None:
+            self.declared_source = self.source
+        if self.declared_multiplier is None:
+            self.declared_multiplier = self.multiplier
+        if self.declared_offset is None:
+            self.declared_offset = self.offset
 
 
 @dataclass(eq=False)

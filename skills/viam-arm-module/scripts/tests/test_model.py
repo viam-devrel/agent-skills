@@ -267,3 +267,28 @@ def test_joint_values_raises_on_wrong_input_count():
         m.joint_values([0.1])
     with pytest.raises(ValueError, match=r"expected 2 input value\(s\)"):
         m.joint_values([0.1, 0.2, 0.3])
+
+
+def test_mimic_declared_triple_defaults_to_given_values():
+    # Mimic.__post_init__: a Mimic built the way urdf.py builds it
+    # BEFORE composition (declared_* not passed) reports its own
+    # source/multiplier/offset as the declared triple too -- correct for
+    # the common, uncomposed case, and what makes urdf.py's composition
+    # walk able to just carry declared_* forward without special-casing
+    # "first hop, no prior Mimic to copy from".
+    m = Mimic(source="q1", multiplier=2.0, offset=0.1)
+    assert (m.declared_source, m.declared_multiplier, m.declared_offset) == ("q1", 2.0, 0.1)
+
+
+def test_mimic_declared_triple_survives_explicit_override():
+    # This is what urdf.py's composition walk relies on: constructing
+    # the POST-composition Mimic with declared_* passed explicitly
+    # (copied from the pre-composition Mimic) keeps the as-authored
+    # triple even though source/multiplier/offset now name the ultimate
+    # (composed) source.
+    m = Mimic(
+        source="j1", multiplier=-6.0, offset=5.551115123125783e-17,
+        declared_source="j2", declared_multiplier=3.0, declared_offset=-0.3,
+    )
+    assert (m.source, m.multiplier, m.offset) == ("j1", -6.0, 5.551115123125783e-17)
+    assert (m.declared_source, m.declared_multiplier, m.declared_offset) == ("j2", 3.0, -0.3)

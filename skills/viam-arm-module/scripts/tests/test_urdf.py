@@ -567,6 +567,45 @@ def test_mimic_of_mimic_composes_transitively(fixtures):
     assert j3.mimic.offset == 0.5
 
 
+def test_mimic_of_mimic_preserves_declared_triple_alongside_composed(fixtures):
+    # Fix (post-A3b-approval, Minor #1): in-place composition is correct
+    # for joint_values()'s computation but destroys what the file
+    # actually said -- a future `validate` finding about a mimic joint
+    # must be able to report the source/multiplier/offset the user
+    # actually wrote, not the collapsed form (and not float noise from
+    # composing that the file never contained).
+    #
+    # j2 mimics j1 (multiplier=-2.0, offset=0.1); j3 mimics j2
+    # (multiplier=3.0, offset=-0.3) -- a mixed-sign three-deep chain
+    # chosen because it produces exactly the float noise a naive
+    # "just round it" fix would be tempted to paper over: composing
+    # gives multiplier=-6.0 (exact) but offset=5.551115123125783e-17
+    # (IEEE-754 noise from 3.0*0.1 + -0.3, arithmetically correct, but
+    # not a number that belongs in a report -- and not what the file
+    # said, which is exactly why declared_offset exists).
+    m = parse_urdf(fixtures / "mimic_of_mimic_mixed_sign.urdf")
+    j3 = next(j for j in m.chain() if j.name == "j3")
+
+    # Declared: exactly what <mimic joint="j2" multiplier="3.0"
+    # offset="-0.3"/> said, untouched by composition.
+    assert j3.mimic.declared_source == "j2"
+    assert j3.mimic.declared_multiplier == 3.0
+    assert j3.mimic.declared_offset == -0.3
+
+    # Composed: collapsed to the ultimate non-mimic source (j1), for
+    # joint_values() to use directly.
+    assert j3.mimic.source == "j1"
+    assert j3.mimic.multiplier == -6.0
+    assert j3.mimic.offset == pytest.approx(0.0, abs=1e-15)
+
+    # A joint that directly mimics a non-mimic joint (the common,
+    # single-hop case) has an identical declared/composed triple --
+    # composition is a no-op there.
+    j2 = next(j for j in m.chain() if j.name == "j2")
+    assert (j2.mimic.declared_source, j2.mimic.declared_multiplier, j2.mimic.declared_offset) == \
+        (j2.mimic.source, j2.mimic.multiplier, j2.mimic.offset) == ("j1", -2.0, 0.1)
+
+
 @pytest.mark.timeout(5)
 def test_mimic_cycle_raises(tmp_path):
     # RDK REJECTS this (verified via the probe against RDK v1.0.0):
