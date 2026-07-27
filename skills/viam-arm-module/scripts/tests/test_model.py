@@ -116,15 +116,15 @@ def test_chain_raises_on_no_root():
         m.chain()
 
 
+@pytest.mark.timeout(5)
 def test_chain_raises_on_reachable_cycle():
     # Covers: `if current in seen` -> "cycle in kinematic model at link
     # ...". A root chain (base->l1) leading directly into a cycle
     # (l1->l2, l2->l1). Unlike test_chain_raises_on_disconnected_joints,
     # this cycle IS reachable from the root, so the walk steps into it
-    # and would loop forever without the seen-set guard. No timeout
-    # marker: pytest-timeout is not installed in this project, so a
-    # regression that reintroduces the infinite loop would hang this
-    # test (and CI) rather than fail fast. Noted as a known gap.
+    # and would loop forever without the seen-set guard. Time-bounded
+    # deliberately: a regression of the guard would hang rather than
+    # fail, and this is the one test where that's actually possible.
     m = KinematicModel(
         name="t",
         joints=[
