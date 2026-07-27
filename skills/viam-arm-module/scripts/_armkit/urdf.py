@@ -160,12 +160,68 @@ def _parse(path: Path) -> KinematicModel:
             if ln not in links:
                 raise ValueError(f"{path}: joint {j.name!r} names {role} link {ln!r}, which is not declared")
 
-    joint_names = {j.name for j in joints}
+    joint_map = {j.name: j for j in joints}
     for j in joints:
-        if j.mimic is not None and j.mimic.source not in joint_names:
+        if j.mimic is not None and j.mimic.source not in joint_map:
             raise ValueError(
                 f"{path}: joint {j.name!r} mimics {j.mimic.source!r}, which is not declared"
             )
+
+    # Resolve mimic chains (A mimics B mimics C -> A mimics C directly,
+    # with composed multiplier/offset), matching RDK's buildMimicMappings
+    # (model_json.go:169-238). This does three things in one walk:
+    #
+    #   1. Detects a mimic cycle (including a joint mimicking itself) --
+    #      value derivation would never terminate otherwise, the same
+    #      failure mode as chain()'s cycle guard one layer up. Wording
+    #      matches RDK's ErrCircularMimicReference exactly.
+    #   2. Rejects mimicking a source with no DoF (fixed, or otherwise
+    #      non-actuated) -- there's no "position" to derive from. Wording
+    #      matches RDK's ErrMimicSourceNotFound ("...which has no DoF")
+    #      exactly, quirky as it is (the source joint isn't non-existent,
+    #      it just lacks DoF -- that's RDK's phrasing, not a bug here).
+    #   3. Composes the multiplier/offset transitively and mutates
+    #      j.mimic in place to point directly at the ultimate (non-mimic)
+    #      source. After this, EVERY joint's j.mimic.source (if any) names
+    #      an ordinary actuated joint, never another mimic -- so
+    #      KinematicModel.joint_values() is a single multiply-add per
+    #      mimic joint instead of its own chain walk.
+    #
+    # Order of composition matters: this joint's value is
+    # multiplier*source's_value + offset, so composing two hops
+    # (this = m1*next + o1, next = m2*next2 + o2) gives
+    # this = m1*m2*next2 + (m1*o2 + o1) -- the offset update must use the
+    # OLD (not-yet-updated) multiplier. Verified numerically, not just by
+    # reading: a hand-built mimic-of-mimic URDF (j2 = 2*q1 + 0.1, j3 =
+    # 3*j2 + 0.2) probed against RDK v1.0.0 gives the identical pose to
+    # an equivalent 3-independent-joint URDF fed [q1, 2*q1+0.1,
+    # 3*(2*q1+0.1)+0.2] directly -- i.e. offset-before-multiplier -- while
+    # updating multiplier first produces a visibly different pose.
+    for j in joints:
+        if j.mimic is None:
+            continue
+        seen = {j.name}
+        composed_multiplier = j.mimic.multiplier
+        composed_offset = j.mimic.offset
+        current = j.mimic.source
+        while True:
+            if current in seen:
+                raise ValueError(
+                    f'{path}: circular mimic joint reference detected: joint "{j.name}"'
+                )
+            seen.add(current)
+            src = joint_map[current]
+            if src.mimic is None:
+                break
+            composed_offset = composed_multiplier * src.mimic.offset + composed_offset
+            composed_multiplier *= src.mimic.multiplier
+            current = src.mimic.source
+        if not joint_map[current].actuated:
+            raise ValueError(
+                f'{path}: mimic joint references non-existent source joint: '
+                f'joint "{j.name}" references source "{current}" which has no DoF'
+            )
+        j.mimic = Mimic(source=current, multiplier=composed_multiplier, offset=composed_offset)
 
     return KinematicModel(
         name=root.get("name", path.stem), joints=joints, links=links,

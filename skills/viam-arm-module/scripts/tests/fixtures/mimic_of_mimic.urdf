@@ -1,0 +1,26 @@
+<robot name="mimic_of_mimic">
+  <link name="base"/>
+  <link name="l1"/>
+  <link name="l2"/>
+  <link name="l3"/>
+  <joint name="q1" type="revolute">
+    <parent link="base"/><child link="l1"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" effort="1" velocity="1"/>
+  </joint>
+  <joint name="j2" type="revolute">
+    <parent link="l1"/><child link="l2"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" effort="1" velocity="1"/>
+    <mimic joint="q1" multiplier="2.0" offset="0.1"/>
+  </joint>
+  <joint name="j3" type="revolute">
+    <parent link="l2"/><child link="l3"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" effort="1" velocity="1"/>
+    <mimic joint="j2" multiplier="3.0" offset="0.2"/>
+  </joint>
+</robot>

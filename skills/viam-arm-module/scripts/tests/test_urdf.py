@@ -546,6 +546,110 @@ def test_mimic_non_numeric_multiplier_raises(tmp_path):
         parse_urdf(path)
 
 
+def test_mimic_of_mimic_composes_transitively(fixtures):
+    # RDK ACCEPTS a mimic-of-a-mimic (DoF=1), composing the multiplier/
+    # offset transitively rather than rejecting the chain -- verified
+    # against RDK v1.0.0 via the probe. j2 mimics q1 (multiplier=2.0,
+    # offset=0.1); j3 mimics j2 (multiplier=3.0, offset=0.2). Composing
+    # gives j3 = 6.0*q1 + 0.5 (offset composed using the OLD multiplier,
+    # before it's updated -- RDK model_json.go:194/208). Cross-checked
+    # numerically against the probe: feeding q1=0.3 through this file
+    # and feeding [0.3, 0.7, 2.3] (the hand-expanded, non-mimic
+    # equivalent) through an otherwise-identical 3-independent-joint
+    # URDF produce IDENTICAL poses on RDK v1.0.0; feeding the
+    # multiplier-before-offset (wrong-order) result [0.3, 0.7, 2.6]
+    # produces a visibly different pose.
+    m = parse_urdf(fixtures / "mimic_of_mimic.urdf")
+    assert m.dof == 1
+    j3 = next(j for j in m.chain() if j.name == "j3")
+    assert j3.mimic.source == "q1"
+    assert j3.mimic.multiplier == 6.0
+    assert j3.mimic.offset == 0.5
+
+
+@pytest.mark.timeout(5)
+def test_mimic_cycle_raises(tmp_path):
+    # RDK REJECTS this (verified via the probe against RDK v1.0.0):
+    #   circular mimic joint reference detected: joint "j2"
+    # A mimic cycle makes value derivation non-terminating -- the same
+    # failure mode as chain()'s cycle guard, one layer up. Time-bounded
+    # deliberately: a regression here hangs rather than fails.
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="l1"/><link name="l2"/><link name="l3"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="l1"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="revolute">
+        <parent link="l1"/><child link="l2"/>
+        <axis xyz="0 0 1"/>
+        <mimic joint="j3"/>
+      </joint>
+      <joint name="j3" type="revolute">
+        <parent link="l2"/><child link="l3"/>
+        <axis xyz="0 0 1"/>
+        <mimic joint="j2"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match=r'circular mimic joint reference detected: joint "j2"'):
+        parse_urdf(path)
+
+
+def test_mimic_self_reference_raises(tmp_path):
+    # RDK REJECTS this (verified via the probe against RDK v1.0.0):
+    #   circular mimic joint reference detected: joint "j2"
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="l1"/><link name="l2"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="l1"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="revolute">
+        <parent link="l1"/><child link="l2"/>
+        <axis xyz="0 0 1"/>
+        <mimic joint="j2"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match=r'circular mimic joint reference detected: joint "j2"'):
+        parse_urdf(path)
+
+
+def test_mimic_of_fixed_joint_raises(tmp_path):
+    # RDK REJECTS this (verified via the probe against RDK v1.0.0):
+    #   mimic joint references non-existent source joint: joint "j3"
+    #   references source "j2" which has no DoF
+    # A fixed joint has no position to derive a mimic value from.
+    path = _write(tmp_path, """
+    <robot name="t">
+      <link name="base"/><link name="l1"/><link name="l2"/><link name="l3"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="l1"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="fixed">
+        <parent link="l1"/><child link="l2"/>
+      </joint>
+      <joint name="j3" type="revolute">
+        <parent link="l2"/><child link="l3"/>
+        <axis xyz="0 0 1"/>
+        <mimic joint="j2"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(
+        ValueError,
+        match=r'mimic joint references non-existent source joint: joint "j3" references source "j2" which has no DoF',
+    ):
+        parse_urdf(path)
+
+
 def test_declared_tip_selects_branch(tmp_path):
     # Part 3: parse_urdf(path, tip=...) stores the declared tip on the
     # model; branching is legal once a tip is declared (Part 2).
