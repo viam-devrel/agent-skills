@@ -1,16 +1,19 @@
 """CLI-level tests for armkit.py, invoked as a subprocess (sys.executable),
 never imported -- this is what a real user runs, PEP 723 header and all.
 
-One test (test_isolated_uv_run_resolves_pep723_dependencies) additionally
-shells out via `uv run --isolated`, proving the PEP 723 dependency block
+One test (test_uv_run_resolves_pep723_dependencies_from_a_cold_cache)
+additionally shells out via `uv run`, proving the PEP 723 dependency block
 itself is correct: every other test here runs the script under the dev
 venv's interpreter, which would happily resolve `_armkit`'s imports even if
-armkit.py's own `dependencies = [...]` list were wrong or incomplete. Only
-`--isolated` builds a throwaway environment strictly from that header.
+armkit.py's own `dependencies = [...]` list were wrong or incomplete. That
+test copies the script (and `_armkit/`) to a fresh path per run so uv keys
+a cold resolution rather than reusing a previously-resolved environment --
+see its docstring for why `--isolated` alone does not achieve this.
 """
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -288,16 +291,98 @@ def test_help_mentions_rdk_divergence():
 
 
 # ---------------------------------------------------------------------------
-# The real user path: uv run --isolated, proving the PEP 723 header itself
-# is correct (not just the dev venv this test suite normally runs under).
+# The real user path: `uv run` resolving armkit.py's OWN PEP 723 header from
+# a cold cache key, proving the dependency list itself is correct -- not
+# just the dev venv this test suite normally runs under.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.timeout(300)
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not installed")
-def test_isolated_uv_run_resolves_pep723_dependencies(fixtures):
+def test_uv_run_resolves_pep723_dependencies_from_a_cold_cache(fixtures, tmp_path):
+    # `--isolated` does NOT force a cold resolution: uv prints "--isolated is
+    # a no-op for Python scripts with inline metadata, which always run in
+    # isolation" -- it changes nothing. Worse, on a WARM cache uv keys its
+    # resolved environment by script path, so re-running against the SAME
+    # path after a dependency is deliberately removed from the header still
+    # passes, reusing the stale environment (measured by hand: deleting
+    # "viam-sdk>=0.79" from armkit.py's dependencies and re-running `uv run
+    # --isolated armkit.py validate ...` against the original path exits 0
+    # anyway). Copying the script to a fresh path each run gives uv a cache
+    # key it has never resolved before, forcing it to actually read the
+    # dependency block -- while still reusing uv's downloaded package cache
+    # (no dependency version pins changed), so a warm run stays fast.
+    #
+    # `_armkit/` must come along too: armkit.py imports it via sys.path[0]
+    # (the directory containing the running script), so copying armkit.py
+    # alone breaks the import with an unrelated ModuleNotFoundError that has
+    # nothing to do with the PEP 723 header this test exists to check.
+    shutil.copytree(SCRIPTS / "_armkit", tmp_path / "_armkit")
+    copy = tmp_path / "armkit.py"
+    copy.write_text(ARMKIT.read_text())
+    copy.chmod(0o755)
     r = subprocess.run(
-        ["uv", "run", "--isolated", str(ARMKIT), "validate", str(fixtures / "ur20.urdf")],
+        ["uv", "run", str(copy), "validate", str(fixtures / "ur20.urdf")],
         capture_output=True, text=True, timeout=290,
     )
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert "6 actuated joints" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# Native library load failure -> exit 2 with a platform message, not exit 1
+# with "this is an armkit bug"
+# ---------------------------------------------------------------------------
+
+def test_native_library_load_failure_exits_2_with_platform_message(fixtures, tmp_path):
+    """Simulates viam-sdk's native library failing to load (e.g. an old
+    glibc under a manylinux wheel), WITHOUT touching the real, working
+    libviam_rust_utils on this machine: a sitecustomize.py shim placed on
+    PYTHONPATH monkeypatches `viam._native.load_native_lib` to raise OSError
+    before armkit ever imports the real thing.
+
+    This exit-2 path is fragile and worth pinning explicitly, not just
+    trusting the code once written -- three facts have to hold together for
+    it to work at all, each discovered by tracing the actual call chain
+    rather than assumed:
+
+    1. `viam._native.load_native_lib` raises OSError (its own docstring says
+       so), not ValueError.
+    2. The native library load is LAZY: `viam.spatialmath._ffi.lib()` is
+       called per rotation conversion (from EulerAngles/AxisAngle
+       constructors), not at import time. So the OSError does not surface
+       when armkit.py imports `_armkit.urdf` at startup -- it surfaces
+       later, from INSIDE `_armkit.urdf.parse_urdf()`, the first time a
+       joint with an <origin> element is parsed and rpy_to_matrix() runs.
+    3. `parse_urdf`'s own broad `except Exception as e: raise ValueError(...)`
+       catch-all (a DELIBERATE safety net for failure modes it doesn't
+       anticipate by name -- see urdf.py) is what turns that OSError into a
+       ValueError carrying the original text. armkit.py's
+       `if "libviam_rust_utils" in str(e)` check then matches against that
+       wrapped text.
+
+    If a future change narrows urdf.py's catch-all to `except ValueError`
+    only (removing the safety net), the OSError from step 2 would propagate
+    OUT of parse_urdf uncaught -- armkit.py's `except ValueError` wouldn't
+    catch it either, and the CLI would crash with a raw traceback instead of
+    exiting 2 with a helpful message. This test is what would catch that
+    regression; it is not just documentation of how the path works today.
+    """
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    (shim_dir / "sitecustomize.py").write_text(
+        "import viam._native\n"
+        "\n"
+        "def _boom(*a, **kw):\n"
+        "    raise OSError('simulated: cannot dlopen libviam_rust_utils (test shim, not real)')\n"
+        "\n"
+        "viam._native.load_native_lib = _boom\n"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(shim_dir) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+    r = subprocess.run(
+        [sys.executable, str(ARMKIT), "validate", str(fixtures / "two_link.urdf")],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 2, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert "Linux" in r.stderr and "macOS" in r.stderr and "Windows" in r.stderr
