@@ -1002,6 +1002,12 @@ so a missing or wrong entry in `armkit.py`'s PEP 723 `dependencies` block would 
 test and still break the real `uv run armkit.py` user path. Add a test that shells out
 with `--isolated` so this is enforced rather than remembered.
 
+**Do not add a blanket `timeout = N` under `[tool.pytest.ini_options]`.** On a cold uv
+cache the `--isolated` test downloads and resolves numpy, trimesh, and pycollada, which
+can exceed any sane global bound and will flake. Keep `@pytest.mark.timeout(...)` targeted
+at the individual tests where a hang is actually possible — currently only
+`test_chain_raises_on_reachable_cycle`. Flagged during Task A2 review.
+
 This is the real user path — PEP 723 with no install step. It must work before committing.
 
 - [ ] **Step 7: Commit**
