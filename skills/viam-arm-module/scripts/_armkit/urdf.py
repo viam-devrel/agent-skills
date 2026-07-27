@@ -89,7 +89,10 @@ def _parse(path: Path) -> KinematicModel:
         axis_elem = je.find("axis")
         axis = None
         if jtype != "fixed":
-            raw = [float(v) for v in (axis_elem.get("xyz") if axis_elem is not None else "1 0 0").split()]
+            try:
+                raw = [float(v) for v in (axis_elem.get("xyz") if axis_elem is not None else "1 0 0").split()]
+            except ValueError as e:
+                raise ValueError(f"{context} has a non-numeric axis component ({e})") from e
             if len(raw) != 3:
                 raise ValueError(f"{context} has a {len(raw)}-component axis; expected 3")
             vec = np.array(raw, dtype=float)
@@ -103,8 +106,14 @@ def _parse(path: Path) -> KinematicModel:
         if jtype == "continuous":
             lower, upper = -np.inf, np.inf
         elif limit is not None:
-            lower = float(limit.get("lower", 0.0))
-            upper = float(limit.get("upper", 0.0))
+            try:
+                lower = float(limit.get("lower", 0.0))
+            except ValueError as e:
+                raise ValueError(f"{context} has a non-numeric limit 'lower' ({e})") from e
+            try:
+                upper = float(limit.get("upper", 0.0))
+            except ValueError as e:
+                raise ValueError(f"{context} has a non-numeric limit 'upper' ({e})") from e
             if jtype == "prismatic":
                 lower, upper = lower * M_TO_MM, upper * M_TO_MM
 

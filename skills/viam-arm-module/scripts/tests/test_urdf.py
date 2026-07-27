@@ -190,6 +190,69 @@ def test_two_component_axis_raises(tmp_path):
         parse_urdf(path)
 
 
+def test_non_numeric_axis_component_raises(tmp_path):
+    # Covers: `<axis xyz="a b c"/>` -- previously a bare
+    # ValueError("could not convert string to float: 'a'") with no file
+    # path or joint name attached, re-raised untouched by parse_urdf's
+    # `except ValueError: raise`. Now wrapped with context at the point
+    # of failure, same pattern as _origin's non-numeric-component guard.
+    path = _write(tmp_path, """
+    <robot name="badaxisval">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="tip"/>
+        <axis xyz="a b c"/>
+        <limit lower="-1.0" upper="1.0" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="non-numeric axis component") as exc_info:
+        parse_urdf(path)
+    assert str(path) in str(exc_info.value)
+    assert "j1" in str(exc_info.value)
+
+
+def test_non_numeric_limit_lower_raises(tmp_path):
+    # Covers: `<limit lower="abc" .../>` -- same untouched-message
+    # failure mode as the axis case, but for a limit attribute instead
+    # of an axis component; the message must say "lower", not "axis",
+    # so the two failure modes don't read identically.
+    path = _write(tmp_path, """
+    <robot name="badlower">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="tip"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="abc" upper="1.0" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="non-numeric limit 'lower'") as exc_info:
+        parse_urdf(path)
+    assert str(path) in str(exc_info.value)
+    assert "j1" in str(exc_info.value)
+
+
+def test_non_numeric_limit_upper_raises(tmp_path):
+    # Covers: `<limit upper="xyz" .../>` -- mirrors the lower case;
+    # message must say "upper", distinguishing it from both the axis
+    # and the lower-limit failure modes.
+    path = _write(tmp_path, """
+    <robot name="badupper">
+      <link name="base"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="tip"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-1.0" upper="xyz" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    with pytest.raises(ValueError, match="non-numeric limit 'upper'") as exc_info:
+        parse_urdf(path)
+    assert str(path) in str(exc_info.value)
+    assert "j1" in str(exc_info.value)
+
+
 def test_missing_parent_raises(tmp_path):
     # Covers: joint with no <parent> element -- previously an
     # AttributeError from `None.get("link")`.
