@@ -142,6 +142,34 @@ def test_two_link_j2_rotates_without_moving_tip(fixtures):
     assert np.allclose(pose[:3, :3], np.diag([-1.0, -1.0, 1.0]), atol=1e-5)
 
 
+def test_revolute_prismatic_matches_rdk(fixtures):
+    # Prismatic is the last untested branch in joint_transform: FK mixes
+    # millimeters (translation) and radians (rotation) in one flat
+    # `vals` dict, and a units slip there ("did prismatic get treated
+    # like a radian, or a revolute's axis*value like meters?") would
+    # regress silently without a dedicated test.
+    #
+    # Probe (RDK v1.0.0), 2026-07-27:
+    #   go run . revolute_prismatic.urdf --at 0.5,300
+    #   POSE  point_mm=[-143.827661581 263.274768567 500.000000000]
+    #         quat=[0.968912422 0.000000000 0.000000000 0.247403959]
+    m = parse_urdf(fixtures / "revolute_prismatic.urdf")
+    pose = forward_kinematics(m, [0.5, 300.0])
+    assert_pose_matches(
+        pose,
+        [-143.827661581, 263.274768567, 500.000000000],
+        [0.968912422, 0.0, 0.0, 0.247403959],
+    )
+
+    # The pose only pins the translation axis*value math; it says
+    # nothing about whether the joint's OWN limits got mm-scaled at
+    # parse time (urdf.py multiplies prismatic lower/upper by M_TO_MM).
+    # That's the other half of the units contract, asserted directly.
+    j2 = next(j for j in m.chain() if j.name == "j2")
+    assert j2.lower == -500.0
+    assert j2.upper == 500.0
+
+
 def test_two_link_link_poses(fixtures):
     # link1's pose is exactly j1's origin translation (1000mm along x)
     # at the zero configuration -- hand-computable, and cross-checked:
