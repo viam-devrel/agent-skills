@@ -79,9 +79,25 @@ the spec calls out.
   file. Ratified during Task A1 review.
 - **Every script** carries a "Why this exists" docstring naming the gap it fills, matching
   `skills/local-viam-server/machine_up.py`.
-- **Units:** URDF is meters/radians. Viam is millimeters/degrees. The parsed `KinematicModel`
-  is **always millimeters and radians internally**; conversion happens at parse and at
-  display. Every test asserts units explicitly.
+- **Units:** URDF is meters/radians. The parsed `KinematicModel` is **always millimeters
+  and radians internally**; conversion happens at parse and at display. Every test asserts
+  units explicitly.
+- **SVA units are not uniform — this is a trap.** Translations are millimeters and joint
+  `min`/`max` are degrees, unconditionally. But **orientation angular units depend on
+  `orientation.type`** (`spatialmath/orientation_json.go` defines five):
+
+  | `type` | angular unit |
+  |---|---|
+  | `ov_degrees` | `th` in degrees |
+  | `ov_radians` | radians |
+  | `euler_angles` | **radians**, RPY in the same `Rz·Ry·Rx` order as URDF |
+  | `axis_angles` | radians |
+  | `quaternion` | unitless |
+
+  Do not assume "SVA means degrees." `ur5e.json` uses `ov_degrees` throughout; `ur20.json`
+  uses `euler_angles` throughout. Measured during Task A1 review: reading `ur20.json`'s
+  `euler_angles` as degrees puts the tip **522 mm** away from the same arm's URDF; reading
+  them as radians agrees to **0.000 mm**.
 
 ---
 
@@ -95,7 +111,13 @@ the spec calls out.
 - Create: `skills/viam-arm-module/scripts/_armkit/__init__.py`
 - Create: `skills/viam-arm-module/scripts/tests/conftest.py`
 - Create: `skills/viam-arm-module/scripts/tests/fixtures/two_link.urdf`
+- Create: `skills/viam-arm-module/scripts/tests/fixtures/meshed.urdf`
 - Modify: `.gitignore` (add `.venv/` and `.pytest_cache/`)
+
+**Fixture coverage note.** Across the real fixtures every joint is `revolute` or `fixed`.
+No fixture exercises `continuous` (A7's `continuous-joint` warning) or `prismatic`
+(`fk.py`'s prismatic branch and `urdf.py`'s millimeter limit conversion). A4 and A7 must
+build those cases inline with `tmp_path` or those paths ship untested.
 
 - [ ] **Step 1: Create the dev project file**
 
@@ -652,10 +674,18 @@ trailing `fixed` joint carrying the final link's transform (`ee_link` above) so 
 frame is right. SVA joints have no `child` field — derive it from the link that names the
 joint as its parent.
 
-Orientations use Viam's orientation vector (`{"type": "ov_degrees", "value": {x, y, z,
-th}}`), not RPY. Implement OV-to-matrix conversion in `_armkit/sva.py`; the authority is
-`spatialmath/orientation_vector.go`. Cover it with its own unit test against a known
-rotation before wiring it into parsing.
+**Orientations are polymorphic — read the Conventions section's unit table before writing
+any code here.** `orientation.type` selects the representation and its angular unit; the
+authority is `spatialmath/orientation_json.go` plus `orientation_vector.go` and
+`eulerangles.go`. The two fixtures deliberately disagree: `ur5e.json` uses `ov_degrees`,
+`ur20.json` uses `euler_angles` (radians). Implement at minimum `ov_degrees`,
+`ov_radians`, and `euler_angles`; raise a clear error on the rest rather than guessing.
+
+`euler_angles` is radian RPY in the same `Rz·Ry·Rx` order as URDF, so `rpy_to_matrix` from
+`_armkit/urdf.py` can be reused directly — do not write a second implementation.
+
+Cover each orientation type with its own unit test against a known rotation before wiring
+it into parsing.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -767,14 +797,22 @@ from _armkit.meshes import inspect_meshes
 from _armkit.urdf import parse_urdf
 
 def test_reports_missing_meshes(fixtures):
-    m = parse_urdf(fixtures / "ur20.urdf")
+    # meshed.urdf references two meshes that do not exist on disk: one via
+    # package:// and one relative. Neither resolves; both must be reported.
+    m = parse_urdf(fixtures / "meshed.urdf")
     report = inspect_meshes(m)
+    assert len(report) == 2
     assert all(r.path for r in report)
-    # ur20.urdf ships without mesh files in this repo, so all are unresolved.
-    assert any(not r.resolved for r in report)
+    assert all(not r.resolved for r in report)
+
+def test_splits_collision_from_visual(fixtures):
+    m = parse_urdf(fixtures / "meshed.urdf")
+    kinds = {r.kind for r in inspect_meshes(m)}
+    assert kinds == {"collision", "visual"}
 
 def test_no_meshes_is_empty_not_an_error(fixtures):
-    m = parse_urdf(fixtures / "two_link.urdf")
+    # ur20.urdf carries only <box> collision primitives and no <visual> at all.
+    m = parse_urdf(fixtures / "ur20.urdf")
     assert inspect_meshes(m) == []
 ```
 
@@ -910,8 +948,15 @@ Expected: PASS (all)
 
 - [ ] **Step 6: Verify it runs standalone via uv**
 
-Run: `uv run skills/viam-arm-module/scripts/armkit.py validate skills/viam-arm-module/scripts/tests/fixtures/ur20.urdf`
-Expected: exit 0, summary reporting 6 actuated joints and `unresolved-mesh` warnings.
+Run: `uv run --isolated skills/viam-arm-module/scripts/armkit.py validate skills/viam-arm-module/scripts/tests/fixtures/ur20.urdf`
+Expected: exit 0, summary reporting 6 actuated joints. (`ur20.urdf` uses `<box>` collision
+primitives and references no meshes, so expect no `unresolved-mesh` findings here — use
+`meshed.urdf` to exercise that path.)
+
+`--isolated` is essential: without it the subprocess resolves imports from the dev venv,
+so a missing or wrong entry in `armkit.py`'s PEP 723 `dependencies` block would pass every
+test and still break the real `uv run armkit.py` user path. Add a test that shells out
+with `--isolated` so this is enforced rather than remembered.
 
 This is the real user path — PEP 723 with no install step. It must work before committing.
 
