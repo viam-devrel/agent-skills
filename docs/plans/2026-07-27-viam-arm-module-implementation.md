@@ -63,6 +63,39 @@ CLI subcommand consume only it. Neither parser is imported by anything except it
 tests and the CLI dispatcher. This is what stops the three-copies-of-URDF-parsing problem
 the spec calls out.
 
+**Shared math lives in `_armkit/transforms.py`** — `rpy_to_matrix`, `axis_angle_to_matrix`,
+and `M_TO_MM`. Both parsers and `fk.py` import from it. This exists because `sva.py` needs
+`rpy_to_matrix` for `euler_angles`, and importing it from `urdf.py` would violate the
+boundary above.
+
+## Error-handling contract
+
+**This applies to every parser and every CLI subcommand. It was missing from the first
+draft of this plan and was added after Task A3 review surfaced five escaping exception
+types.**
+
+`armkit` is a validator. **Malformed input is the expected input, not the exception.** A
+traceback is never an acceptable response to a bad kinematics file — it defeats the CLI's
+exit-code contract, which is the only thing an agent can depend on.
+
+Rules:
+
+1. **`parse_urdf` and `parse_sva` raise `ValueError` and nothing else.** Wrap the parse
+   body so `AttributeError`, `TypeError`, `IndexError`, `ET.ParseError`, and `OSError` all
+   leave as `ValueError`. Measured during A3 review: a missing `<parent>` gives
+   `AttributeError`, malformed XML gives `ET.ParseError` (whose MRO is `SyntaxError`, *not*
+   `ValueError`), and a nonexistent path gives `FileNotFoundError` — none catchable by a
+   single `except ValueError`.
+2. **Every parse error names the file and the offending element.** Bare messages like
+   `could not convert string to float: 'a'` are useless to someone staring at a 400-line
+   URDF. The parser has the path and the joint name in hand; include them.
+3. **Reject structurally unusable input at parse time rather than passing it through.**
+   Unknown or missing joint `type`, an axis without exactly three components, a link or
+   joint without a name. A model that parses "successfully" into 0 actuated joints and
+   reports PASS is worse than one that fails loudly.
+4. **CLI subcommands catch `ValueError` only**, and convert it to an error finding with
+   exit 1. If a subcommand needs a broader catch, the parser is not holding up its end.
+
 ## Conventions
 
 - **Running:** `uv run skills/viam-arm-module/scripts/armkit.py <subcommand>`. PEP 723
@@ -508,10 +541,17 @@ git commit -m "feat(armkit): URDF joint and link parsing"
 
 **Files:**
 - Create: `skills/viam-arm-module/scripts/_armkit/fk.py`
+- Modify: `skills/viam-arm-module/scripts/_armkit/transforms.py` (add `axis_angle_to_matrix`)
 - Test: `skills/viam-arm-module/scripts/tests/test_fk.py`
 
 This is the task that closes the gap the spec names: FK exists only in Go's
 `referenceframe`, so Python and C++ module authors have no way to check their own model.
+
+**`axis_angle_to_matrix` goes in `transforms.py`, not `fk.py`** — it belongs beside
+`rpy_to_matrix` rather than splitting the rotation helpers across two modules. `fk.py`
+imports it. Give it its own unit test (orthonormality and `det == 1` over a spread of
+axes and angles); a rotation helper that only gets exercised through FK is one whose
+failures surface as confusing pose errors rather than as a failing unit test.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -958,10 +998,19 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 | `inverted-limits` | error | `lower > upper` |
 | `unresolved-mesh` | warn | mesh reference that does not resolve on disk |
 | `heavy-mesh` | warn | resolved collision mesh over 5 000 triangles |
-| `nonunit-axis` | error | axis that is not unit length after normalization attempt |
 | `dh-format` | warn | `kinematic_param_type: "DH"` — supported but not recommended |
 | `missing-limits` | error | actuated, non-`continuous` joint whose `lower`/`upper` are `None` |
 | `structure` | error | `chain()` raised — branching, cycle, multiple roots, or disconnection |
+| `parse` | error | the parser raised `ValueError` — surface its message verbatim |
+
+**`nonunit-axis` was removed.** It was defined as "axis that is not unit length after
+normalization attempt," which can never fire — `parse_urdf` always normalizes, so the
+post-parse norm is exactly 1.0 for every 3-vector (measured during A3 review). Axis arity
+is now rejected at parse time per the error-handling contract and surfaces as `parse`.
+
+Do not check `root.tag == "robot"` in the CLI — that belongs in the parser, per contract
+rule 3. A non-URDF root currently parses and then produces the misleading diagnosis
+`kinematic model has no root link (cycle?)`.
 
 Print a summary line (`<name>: <n> actuated joints, base <base> -> tip <tip>`), then each
 finding, then `PASS` or `FAIL`.
