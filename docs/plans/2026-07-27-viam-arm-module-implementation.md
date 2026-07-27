@@ -562,11 +562,42 @@ imports it. Give it its own unit test (orthonormality and `det == 1` over a spre
 axes and angles); a rotation helper that only gets exercised through FK is one whose
 failures surface as confusing pose errors rather than as a failing unit test.
 
-**Sequence note: run A3b before A4 if possible.** A3b changes what FK consumes — mimic
-joints take no input slot and derive their value from a source joint, the tip becomes
-explicit rather than implied by `chain()[-1].child`, and input order becomes BFS. Building
-FK against the pre-parity model means rewriting it. If A4 does land first, treat these
-three as known-pending changes rather than discovering them.
+**A3b is complete, and it did most of A4's design work.** `KinematicModel.joint_values(inputs)`
+takes the flat BFS-ordered input vector and returns a value per joint name with mimics
+already derived, so `link_poses` needs no ordering knowledge, no name→index map, and no
+mimic handling. The reviewer wrote and verified this implementation during A3b review:
+
+```python
+def link_poses(model, inputs):
+    vals = model.joint_values(inputs)
+    chain = model.chain()
+    poses = {chain[0].parent: np.eye(4)}
+    current = np.eye(4)
+    for j in chain:
+        current = current @ joint_transform(j, vals[j.name])
+        poses[j.child] = current.copy()
+    return poses
+```
+
+**Use the pose oracle, not hand-computed values.** The Go probe supports
+`go run . <file> --at q1,q2,...`, printing RDK's `Transform()` point and quaternion at 9
+decimals. This plan's hand-computed FK assertions were wrong twice before review caught
+them; the oracle removes that whole failure class.
+
+Verified against RDK v1.0.0 during A3b review — use these directly as test assertions:
+
+| model | inputs | RDK point (mm) | RDK quaternion |
+|---|---|---|---|
+| `test_mimic_serial.urdf` | `0.1, -0.4` | `[-19.568679001, 0.0, 295.034065440]` | `[0.98006658, 0, -0.19866933, 0]` |
+| `ur20.urdf` | `0.1,-0.4,0.7,0.2,-0.3,0.5` | `[-1332.073428033, -483.810901083, 238.695348151]` | `[0.59077555, 0.62428142, -0.19857677, 0.47098218]` |
+
+The `ur20` point has now been triangulated three ways: the A1 fixture review computed it
+independently, A3b's `link_poses` draft reproduced it, and the probe reports it from RDK.
+
+**Confirm the quaternion component order from the probe's own source before asserting on
+it** — RDK's `quat.Number` has `Real, Imag, Jmag, Kmag`, so the printed order is almost
+certainly `(w, x, y, z)`, but check rather than assume. Comparing points alone is a valid
+first step if orientation conventions prove fiddly; comparing both is the goal.
 
 - [ ] **Step 1: Write the failing test**
 
