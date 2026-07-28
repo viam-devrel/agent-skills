@@ -92,12 +92,25 @@ class Joint:
         return self.type in ACTUATED_TYPES
 
 
-@dataclass
+@dataclass(eq=False)
 class Link:
+    """`eq=False` for the same reason as Joint (above): the mesh-origin
+    lists below hold numpy arrays, and the default dataclass __eq__ would
+    call `==` on them element-wise and crash on the ambiguous-truth-value
+    check the moment either list is non-empty.
+    """
     name: str
     collision_meshes: list[str] = field(default_factory=list)
     visual_meshes: list[str] = field(default_factory=list)
     collision_primitives: list[dict] = field(default_factory=list)
+    # Parallel-indexed with collision_meshes/visual_meshes: origins[i] is
+    # the 4x4 homogeneous transform (mm translation) from the <origin>
+    # element of the <collision>/<visual> that meshes[i] came from --
+    # identity when that element had none. Populated by urdf.py alongside
+    # the path lists themselves so meshes.py (A6) can read a mesh's
+    # placement inside the link frame without re-parsing the XML.
+    collision_mesh_origins: list[np.ndarray] = field(default_factory=list)
+    visual_mesh_origins: list[np.ndarray] = field(default_factory=list)
 
 
 @dataclass(eq=False)

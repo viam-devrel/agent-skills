@@ -45,6 +45,32 @@ def _origin(elem: ET.Element | None, context: str) -> np.ndarray:
     return t
 
 
+def _mesh_refs(le: ET.Element, tag: str, context: str) -> tuple[list[str], list[np.ndarray]]:
+    """Mesh filenames plus the origin transform (mm) of the <visual>/
+    <collision> element each one came from -- parallel-indexed lists, one
+    pair per direct-child <visual>/<collision> that has a <mesh> geometry
+    (a link can have several). Identity when that element has no
+    <origin>, via _origin()'s own default -- matching every other origin
+    in this parser, not a mesh-specific special case.
+
+    Kept as two parallel lists rather than one list-of-objects because
+    Link.visual_meshes/collision_meshes (plain path lists) already existed
+    and are read elsewhere (checks.py's mesh-references count) -- adding a
+    second, index-matched list preserves that shape instead of replacing
+    it.
+    """
+    paths: list[str] = []
+    origins: list[np.ndarray] = []
+    for elem in le.findall(tag):
+        mesh_elem = elem.find("geometry/mesh")
+        filename = mesh_elem.get("filename") if mesh_elem is not None else None
+        if not filename:
+            continue
+        paths.append(filename)
+        origins.append(_origin(elem.find("origin"), context))
+    return paths, origins
+
+
 def _parse(path: Path) -> KinematicModel:
     if not path.exists():
         raise ValueError(f"{path}: file not found")
@@ -78,15 +104,19 @@ def _parse(path: Path) -> KinematicModel:
         # This is the minimal addition needed for validate's Fix 2: knowing
         # a file references N mesh files at all is enough to warn that RDK
         # hard-fails on one it can't find, without armkit touching disk.
-        # findall() with a "/" path matches every <mesh> under every
-        # <visual>/<collision> sibling this link has, not just the first.
-        visual_meshes = [
-            m.get("filename") for m in le.findall("visual/geometry/mesh") if m.get("filename")
-        ]
-        collision_meshes = [
-            m.get("filename") for m in le.findall("collision/geometry/mesh") if m.get("filename")
-        ]
-        links[name] = Link(name=name, visual_meshes=visual_meshes, collision_meshes=collision_meshes)
+        # _mesh_refs walks direct-child <visual>/<collision> elements (a
+        # link can have several), one entry per <mesh> geometry found.
+        visual_meshes, visual_mesh_origins = _mesh_refs(
+            le, "visual", f"{path}: link {name!r} visual"
+        )
+        collision_meshes, collision_mesh_origins = _mesh_refs(
+            le, "collision", f"{path}: link {name!r} collision"
+        )
+        links[name] = Link(
+            name=name,
+            visual_meshes=visual_meshes, visual_mesh_origins=visual_mesh_origins,
+            collision_meshes=collision_meshes, collision_mesh_origins=collision_mesh_origins,
+        )
 
     joints: list[Joint] = []
     for je in root.findall("joint"):
