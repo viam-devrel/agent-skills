@@ -1296,13 +1296,22 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 
 > **`validate` must use the cheap path. Measured during A6 review:**
 >
-> | operation | time |
-> |---|---|
-> | `parse_urdf` | 2.3 ms |
-> | resolution only (14 refs) | **0.25 ms** |
-> | `inspect_meshes` full load (14 refs) | **1505.7 ms** |
+> | operation | reviewer | implementer | notes |
+> |---|---|---|---|
+> | `parse_urdf` | 2.3 ms | ~0.3 ms | |
+> | resolution only (14 refs) | 0.25 ms | ~0.34 ms | agree |
+> | full load (14 refs) | 1505.7 ms | ~108 ms | **disk-cache dependent** |
 >
-> A 6 000× gap. `unresolved-mesh` needs **only** resolution, and it is the finding that
+> **The two measurements disagree by 14×, and the implementer diagnosed why rather than
+> restating either number:** its own earlier corpus scan had already read every mesh under
+> `~/src/mycobot_ros2`, warming the OS page cache, so its "cold process" run was not
+> cold-disk. Both figures are real; they measure different cache states. The honest range
+> is **~300× warm to ~6 000× cold**, and a first run on a user's machine is the cold case.
+>
+> Caching's own contribution was isolated separately from that confound: 183 ms without
+> dedup vs 108 ms with, over 7 distinct files behind 14 references.
+>
+> The conclusion is unchanged and does not depend on which figure is right. `unresolved-mesh` needs **only** resolution, and it is the finding that
 > closes the largest PASS-vs-RDK-loads gap. `inspect_meshes` therefore takes
 > `load: bool = True`; `validate` calls it with `load=False` so every unresolved mesh is
 > caught for free, and `armkit meshes` / `heavy-mesh` opt into loading. Without this, A8
