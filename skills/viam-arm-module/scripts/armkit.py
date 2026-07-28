@@ -3,6 +3,16 @@
 # requires-python = ">=3.11"
 # dependencies = ["numpy>=1.26", "trimesh>=4.0", "pycollada>=0.8", "viam-sdk>=0.79"]
 # ///
+# viam-sdk floor is deliberately >=0.79, not pinned narrower: 0.79.x and
+# 0.80.0 are both explicitly supported (0.80.0 changed
+# RotationMatrix.elements' buffer layout from column- to row-major with no
+# warning; _armkit/transforms.py no longer reads that buffer at all, going
+# through Quaternion's w/i/j/k scalar accessors instead, which are
+# layout-agnostic and measured identical -- max diff 1.1e-16 -- on both
+# versions). Verify a floor-widening claim like this by actually running
+# the suite under both versions before trusting it; see
+# tests/test_transforms.py's oracle tests for how that verification is
+# automated going forward.
 """armkit -- validate and inspect Viam arm kinematics files.
 
 Why this exists

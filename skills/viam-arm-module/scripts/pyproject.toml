@@ -3,6 +3,12 @@
 name = "armkit-dev"
 version = "0.1.0"
 requires-python = ">=3.11"
+# viam-sdk floor stays >=0.79 (no upper pin): 0.79.x and 0.80.0 are both
+# explicitly supported and both tested (see tests/test_transforms.py's
+# oracle tests, and armkit.py's PEP 723 header for the buffer-layout
+# incident that made this worth stating explicitly). uv.lock below tracks
+# 0.80.0 (current) deliberately, not 0.79.2 -- pinning the lock to the
+# version that hid this bug once was the reason it shipped silently.
 dependencies = ["numpy>=1.26", "trimesh>=4.0", "pycollada>=0.8", "viam-sdk>=0.79"]
 
 [dependency-groups]
