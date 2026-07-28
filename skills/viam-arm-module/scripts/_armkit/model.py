@@ -98,6 +98,12 @@ class Link:
     lists below hold numpy arrays, and the default dataclass __eq__ would
     call `==` on them element-wise and crash on the ambiguous-truth-value
     check the moment either list is non-empty.
+
+    This gives up structural equality (`Link(...) == Link(...)`), which
+    nothing depended on when this was added -- but it was a deliberate
+    earlier choice to keep Link comparable, traded away here for
+    correctness. Tests that want to compare two Links should compare
+    individual fields, not rely on `==`.
     """
     name: str
     collision_meshes: list[str] = field(default_factory=list)
