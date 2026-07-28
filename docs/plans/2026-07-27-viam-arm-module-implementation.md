@@ -1224,6 +1224,21 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 | `input-out-of-bounds` | error | a `--at` value falls outside its joint's declared limits |
 | `joints-off-chain` | error | actuated joints exist that are not on the path to the tip |
 
+> **Reported joints ≠ joints to edit. This bit us in C1 and will bite A9.**
+> `joints-off-chain` lists only *actuated* off-chain joints, because mimic joints are
+> excluded from `actuated_joints` by design (A3b, matching RDK). A gripper's remaining
+> joints are usually `fixed` or `mimic`, so they are **not listed and still must go**.
+>
+> Measured on a real mycobot gripper URDF: armkit names one joint
+> (`gripper_controller`); deleting only that joint turns a `joints-off-chain` error into a
+> **`parse` error**, because five other joints `<mimic>` it. The actual edit is 6 joints
+> and 6 links — the whole gripper subtree.
+>
+> Any guidance or tooling that removes off-chain joints must work **from the tip
+> downward** (delete every joint whose parent is the tip or downstream of it), not from
+> the list armkit prints. A9's `simplify` should implement it that way, and any reference
+> doc describing the fix must say so.
+
 **`joints-off-chain` enforces the scope: one arm, not a robot.** RDK's BFS counts every
 actuated joint in the tree toward DoF — correct for RDK, wrong for a Viam arm module.
 Measured on a mycobot 320 with its gripper attached and `--tip gripper_base`:
