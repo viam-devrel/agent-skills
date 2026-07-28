@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Source-verified Claude Code skills for the Viam robotics platform. Install the full suite or pick individual SDKs and tools.",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "plugins": [
     {
       "name": "viam-skills",
       "source": "./",
-      "description": "Full Viam skill suite — all 9 skills: SDKs, ML, fleet/module tooling, and machine tooling.",
+      "description": "Full Viam skill suite — all 10 skills: SDKs, ML, arm module authoring, fleet/module tooling, and machine tooling.",
       "category": "robotics",
       "tags": ["viam", "bundle", "all-sdks"],
       "strict": false
@@ -65,6 +65,13 @@
       "description": "TypeScript SDK: browser robot control, Viam Applications, HMIs.",
       "category": "robotics",
       "tags": ["viam", "typescript", "web"]
+    },
+    {
+      "name": "viam-arm-module",
+      "source": "./plugins/viam-arm-module",
+      "description": "Build a Viam arm module: kinematics validation, simulated model, driver, and packaging, in Go, Python, or C++.",
+      "category": "robotics",
+      "tags": ["viam", "arm", "kinematics", "modules"]
     },
     {
       "name": "local-viam-server",

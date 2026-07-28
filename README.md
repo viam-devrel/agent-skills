@@ -22,6 +22,16 @@ Deep, source-verified reference skills — each pairs a `SKILL.md` with referenc
 
 **Total: ~14,500 lines of reference material across 25 files.**
 
+### Module-building skill
+
+Guides building a Viam arm module — kinematics through a simulated model, real driver, and packaging — across Go, Python, or C++, backed by `armkit`, a bundled offline kinematics validator.
+
+| Skill | Scope | Lines |
+|-------|-------|------:|
+| [viam-arm-module](skills/viam-arm-module/) | Arm module kinematics validation, simulated model, driver, and packaging — Go, Python, or C++ | 216 |
+
+Unlike every other skill here, this one ships an executable toolkit (`armkit.py`, the `_armkit/` package, and a test suite) with a `uv`-run entry point and non-stdlib dependencies — heavier than the single stdlib-only script each machine-tooling skill bundles below.
+
 ### Machine tooling skills
 
 Operational skills — each bundles an executable Python script for working with live Viam machines from the command line, in places the `viam` CLI itself can't.
@@ -59,6 +69,7 @@ The skills cross-reference each other rather than duplicating knowledge:
 - **Module lifecycle** (scaffold, build, upload, deploy) lives in `viam-modules-fleet` — all language skills reference it for deployment
 - **ML pipeline** (data capture, training, model deployment) lives in `viam-ml` — referenced by vision and language skills
 - **Machine operations** (create a machine, run `viam-server`, push a robot config) live in `local-viam-server` and `viam-machine-config` — they drive live machines via the Viam app API, complementing the build/upload workflows in `viam-modules-fleet`
+- **Arm module authoring** (kinematics validation, simulated model, driver, packaging across Go/Python/C++) lives in `viam-arm-module` — feeds into `viam-modules-fleet` for packaging and upload once the module is built
 
 ## Installation
 
@@ -90,7 +101,7 @@ You'll see the `viam-agent-skills` marketplace with these plugins:
 
 | Plugin | What it installs |
 |--------|------------------|
-| `viam-skills` | **Bundled** — all 9 skills below |
+| `viam-skills` | **Bundled** — all 10 skills below |
 | `viam-go-motion-vision` | Arm, camera, vision, motion planning (Go) |
 | `viam-go-platform` | Non-manipulation Go components, services, resource API |
 | `viam-modules-fleet` | Viam CLI, module lifecycle, fleet/robot config |
@@ -98,6 +109,7 @@ You'll see the `viam-agent-skills` marketplace with these plugins:
 | `viam-ml` | Data capture, training, model deployment |
 | `viam-cpp` | C++ SDK driver patterns |
 | `viam-typescript` | Browser robot control, HMIs, Viam Applications |
+| `viam-arm-module` | Build a Viam arm module: kinematics, simulated model, driver, packaging |
 | `local-viam-server` | Create a cloud machine + run a local viam-server |
 | `viam-machine-config` | Push a machine's robot config via the app API |
 
@@ -107,6 +119,7 @@ You'll see the `viam-agent-skills` marketplace with these plugins:
 /plugin install viam-skills@viam-agent-skills
 /plugin install viam-python@viam-agent-skills
 /plugin install viam-cpp@viam-agent-skills
+/plugin install viam-arm-module@viam-agent-skills
 /plugin install local-viam-server@viam-agent-skills
 ```
 
