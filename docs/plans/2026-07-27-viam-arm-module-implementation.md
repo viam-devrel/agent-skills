@@ -206,7 +206,40 @@ binding to `libviam_rust_utils` — the same native library behind RDK — so it
 are canonical rather than a Python reimplementation. This matters most for A5, whose five
 orientation types include Viam's own orientation-vector format.
 
-> **Layout trap — `RotationMatrix.elements` is COLUMN-major.** The class docstring says
+> **RESOLVED (2026-07-28): never read `RotationMatrix.elements`. Build matrices from
+> quaternion components instead.**
+>
+> `viam-sdk` **0.80.0 flipped the buffer to row-major** — the "fix" this plan warned about,
+> arriving one day later. Measured against the verified reference matrix:
+>
+> | | `order="C"` | `order="F"` |
+> |---|---|---|
+> | 0.79.2 | 0.565 ✗ | 1.1e-16 ✓ |
+> | 0.80.0 | 1.1e-16 ✓ | 0.565 ✗ |
+>
+> Since `armkit.py`'s PEP 723 block declares `viam-sdk>=0.79` (a floor), any user on a cold
+> cache was getting silently transposed rotations. The dev environment missed it because
+> `uv.lock` pinned 0.79.2.
+>
+> **The guards worked.** Under 0.80.0: 23 failures, including the layout-pinning test, the
+> numpy-oracle cross-checks, and the RDK-verified FK poses (`test_ur20_matches_rdk`,
+> `test_mimic_serial_matches_rdk`). Note which parametrized cases *survived* — `axis4`,
+> `axis5`, `axis10`, all at **exactly ±π** — because a 180° rotation matrix is symmetric
+> and a transpose is invisible. The near-π cases (`axis6`, `axis7`, `axis11`) failed. The
+> A4b testing lesson firing for real.
+>
+> **The fix: read quaternions, never the matrix buffer.** `Quaternion.w/.i/.j/.k` are
+> scalar accessors carrying no layout. Building the 3×3 from those is identical on 0.79.2
+> and 0.80.0 (worst diff 5.551e-16 on both) and immune to any future representation change.
+> This rule extends to A5: use `OrientationVector.to_quaternion()` and read components —
+> do not touch `RotationMatrix`.
+>
+> Retrospect: the A4b reviewer argued that converting `rpy_to_matrix`/`axis_angle_to_matrix`
+> to FFI "buys no measurable accuracy and introduces a silent-transpose failure mode that
+> did not previously exist." That failure mode fired within a day. The dependency is still
+> justified for A5's orientation-vector math; reading its *matrix buffer* was the mistake.
+>
+> **Historical — the trap as originally found (0.79.2, column-major):** The class docstring says
 > `elements[3*row + col]` (row-major), and that is wrong: the buffer is nalgebra's, which
 > is column-major. Measured against the verified `rpy_to_matrix(0.1, 0.2, 0.3)`:
 >
