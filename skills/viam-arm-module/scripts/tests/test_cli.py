@@ -244,12 +244,111 @@ def test_validate_cycle_structure_finding_has_no_tip_remedy(tmp_path):
     assert "--tip" not in r.stdout
 
 
-def test_validate_multi_leaf_remedy_resolves_the_model(fixtures):
-    # The remedy this fix prints must actually work -- re-running with the
-    # suggested --tip must pass.
-    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "finger_l")
+def test_validate_multi_leaf_remedy_resolves_structure_but_surfaces_off_chain(fixtures):
+    # UPDATED by the joints-off-chain task: this test previously asserted
+    # that following the fork-point remedy (--tip palm) produces a PASS.
+    # That is no longer true, and this is the DELIBERATE, INTENDED
+    # consequence documented in that task, not a quietly-adjusted
+    # expectation -- two_leaf.urdf's fork point ("palm") has two ACTUATED
+    # children (jl, jr; a real two-fingered gripper shape), so declaring
+    # --tip palm resolves the STRUCTURE question (chain() no longer raises)
+    # but both fingers are now actuated joints off the arm's chain to
+    # "palm" -- exactly the scope violation joints-off-chain exists to
+    # catch. This is "the correct sequence" per that task: the user learns
+    # the structural issue first (this fixture's own structure-error test),
+    # then the scope issue, one at a time.
+    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "palm")
+    assert r.returncode == 1, r.stdout
+    assert "joints-off-chain" in r.stdout
+    assert "'jl'" in r.stdout and "'jr'" in r.stdout
+    assert "FAIL" in r.stdout
+
+
+def test_validate_off_chain_fixed_joints_do_not_trigger_the_check(tmp_path):
+    # joints-off-chain only cares about ACTUATED joints off the chain -- a
+    # branch made entirely of fixed joints (e.g. a decorative mount point,
+    # a static bracket) is not a scope violation and must still PASS once
+    # --tip resolves which leaf is the arm's own end effector. This is what
+    # makes the remedy still "work" in the case it legitimately should.
+    path = write_urdf(tmp_path, """
+    <robot name="fixed_branch">
+      <link name="base"/><link name="mid"/><link name="fork"/>
+      <link name="armtip"/><link name="bracket"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="mid"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="revolute">
+        <parent link="mid"/><child link="fork"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j_arm_tip" type="fixed">
+        <parent link="fork"/><child link="armtip"/>
+        <origin xyz="0.1 0 0" rpy="0 0 0"/>
+      </joint>
+      <joint name="j_bracket" type="fixed">
+        <parent link="fork"/><child link="bracket"/>
+        <origin xyz="-0.1 0 0" rpy="0 0 0"/>
+      </joint>
+    </robot>
+    """)
+    r = run("validate", str(path), "--tip", "armtip")
     assert r.returncode == 0, r.stdout
+    assert "joints-off-chain" not in r.stdout
     assert "PASS" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# joints-off-chain: a Viam arm module describes one arm, not a whole robot
+# (a gripper shipped attached in the same URDF is a separate component).
+# ---------------------------------------------------------------------------
+
+def test_validate_joints_off_chain_error_and_names_the_joints(fixtures):
+    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "palm")
+    assert r.returncode == 1
+    assert "[ERROR] joints-off-chain:" in r.stdout
+    assert "'palm'" in r.stdout            # names the declared tip
+    assert "'jl'" in r.stdout and "'jr'" in r.stdout   # names the offending joints
+    assert "2 actuated joints" in r.stdout or "2 actuated joint" in r.stdout
+
+
+def test_validate_plain_single_arm_files_unaffected_by_off_chain_check(fixtures):
+    # Confirms the new check does not false-positive on ordinary, unbranched
+    # single-arm files -- the common, intended input.
+    for name in ("ur20.urdf", "two_link.urdf"):
+        r = run("validate", str(fixtures / name))
+        assert r.returncode == 0, (name, r.stdout)
+        assert "joints-off-chain" not in r.stdout
+        assert "PASS" in r.stdout
+
+
+def test_validate_json_joints_off_chain_shape(fixtures):
+    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "palm", "--json")
+    payload = json.loads(r.stdout)
+    assert payload["verdict"] == "FAIL"
+    off = [f for f in payload["findings"] if f["code"] == "joints-off-chain"]
+    assert len(off) == 1
+    # A single finding carries the FULL list under "joints" -- the
+    # singular, per-check-function-convention "joint" field would force an
+    # arbitrary choice among possibly several offending joints, or splitting
+    # into N findings (one per joint), which would fight the human-readable
+    # single aggregated message ("N actuated joints are not on the chain").
+    # "joints" is None for every OTHER finding code.
+    assert off[0]["joint"] is None
+    assert sorted(off[0]["joints"]) == ["jl", "jr"]
+    other_findings = [f for f in payload["findings"] if f["code"] != "joints-off-chain"]
+    assert all(f.get("joints") is None for f in other_findings)
+
+
+def test_validate_no_allow_off_chain_joints_override_flag(fixtures):
+    # Pinned deliberately: the user considered --allow-off-chain-joints and
+    # chose not to add it. This must stay a plain argparse usage error, not
+    # silently become a real flag later without a conscious decision.
+    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "palm",
+            "--allow-off-chain-joints")
+    assert r.returncode == 2
 
 
 # ---------------------------------------------------------------------------
@@ -553,8 +652,13 @@ def test_auto_selected_tip_is_signaled_when_tip_not_given(fixtures):
 
 
 def test_explicit_tip_is_not_signaled_as_auto_selected(fixtures):
-    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "finger_l")
-    assert r.returncode == 0
+    # Uses two_link.urdf (single leaf, no branching) rather than a
+    # multi-leaf fixture: this test is about the auto-selection SIGNAL
+    # specifically, decoupled from whether the model also happens to have
+    # actuated joints off the declared tip's chain (see the
+    # joints-off-chain tests for that, separate concern).
+    r = run("validate", str(fixtures / "two_link.urdf"), "--tip", "tip")
+    assert r.returncode == 0, r.stdout
     assert "auto-selected" not in r.stdout
 
 

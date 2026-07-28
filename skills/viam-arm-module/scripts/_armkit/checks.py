@@ -36,8 +36,9 @@ class Finding:
     level: str   # "error" | "warn"
     code: str
     message: str
-    joint: str | None = None    # the single joint this finding is about, if any
-    remedy: str | None = None   # armkit-authored fix suggestion, never RDK's own wording
+    joint: str | None = None          # the single joint this finding is about, if any
+    remedy: str | None = None         # armkit-authored fix suggestion, never RDK's own wording
+    joints: list[str] | None = None   # MULTIPLE joints, for a finding about more than one at once
 
     @property
     def is_error(self) -> bool:
@@ -130,6 +131,65 @@ def check_dof(actuated: list[Joint], expect_dof: int | None) -> list[Finding]:
     if dof != expect_dof:
         return [Finding("error", "dof-mismatch", f"expected {expect_dof} DOF, model has {dof}")]
     return []
+
+
+def check_joints_off_chain(chain: list[Joint], actuated: list[Joint], tip: str) -> list[Finding]:
+    """joints-off-chain: an actuated joint that is not on the resolved tip's
+    root-to-tip path.
+
+    This is a SCOPE check, not an RDK-parity one -- see the "armkit is
+    right" divergence recorded for it in tests/test_parity.py, alongside
+    the missing-mesh and missing-<origin> divergences. armkit validates a
+    VIAM ARM MODULE's kinematics: one serial chain, optionally with a tool
+    attached -- not a general URDF/whole-robot validator. `actuated` (BFS
+    over the WHOLE frame system, per A3b) deliberately matches RDK's own
+    DoF, because RDK models whole robots where a branch's joints
+    legitimately consume input slots. A Viam arm module is not a whole
+    robot: a gripper shipped attached to the arm in the SAME URDF is a
+    SEPARATE Viam component with its own JointPositions arity, and folding
+    its joint(s) into the arm's declared DoF produces a module whose
+    GetKinematics/motion planning can only actually drive the chain path,
+    not the full (BFS) count it claims.
+
+    Error level, not warn -- the user's own call: the most common real
+    input is a vendor URDF with the gripper still attached, and passing
+    that silently is exactly the failure this toolkit exists to prevent.
+    No override flag exists (an --allow-off-chain-joints option was
+    considered and deliberately not added).
+
+    Runs identically whether the tip was auto-selected or given via --tip
+    -- the scope violation depends only on chain membership, not on how
+    the tip was resolved. (In practice this can only ever fire when --tip
+    was given: URDF is a tree, so a model with a genuinely unique leaf --
+    the only way auto-selection succeeds at all -- has no branching
+    anywhere, meaning every actuated joint is necessarily on that one
+    chain. Still computed the same way in both cases rather than special-
+    cased, since the invariant is what keeps this correct, not an
+    assumption about how it's reached.)
+
+    A single Finding carries ALL offending joint names under `joints`
+    (plural) rather than `joint` (singular, used elsewhere) or one Finding
+    per joint: the natural report here is "N actuated joints are not on
+    the chain", one aggregated fact, and forcing that into N separate
+    findings (or into `joint` by picking one arbitrarily) would fight the
+    single-message shape without adding information a consumer couldn't
+    already get from `joints`. `joint` stays None on this finding.
+    """
+    chain_names = {j.name for j in chain}
+    off_chain = [j.name for j in actuated if j.name not in chain_names]
+    if not off_chain:
+        return []
+    count = len(off_chain)
+    message = (
+        f"{count} actuated joint{'s' if count != 1 else ''} "
+        f"{'is' if count == 1 else 'are'} not on the arm's chain to {tip!r}: {off_chain!r}."
+    )
+    remedy = (
+        "-> A Viam arm module's kinematics must describe only the arm -- a gripper is a\n"
+        "   separate component. Remove the off-chain joints from the file, or set --tip\n"
+        "   to a link further out if they are genuinely part of the arm."
+    )
+    return [Finding("error", "joints-off-chain", message, joints=off_chain, remedy=remedy)]
 
 
 def check_rdk_parity_risks(model: KinematicModel) -> list[Finding]:

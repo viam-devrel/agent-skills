@@ -43,6 +43,7 @@ from _armkit.checks import (
     check_at_bounds,
     check_dof,
     check_joint_limits,
+    check_joints_off_chain,
     check_rdk_parity_risks,
     check_unit_scale,
 )
@@ -285,6 +286,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     findings: list[Finding] = []
     findings += check_dof(actuated, args.expect_dof)
+    findings += check_joints_off_chain(chain, actuated, tip)
     findings += check_joint_limits(actuated)
     findings += check_unit_scale(model, chain)
 
@@ -349,7 +351,7 @@ def _report(
             "summary": summary,
             "findings": [
                 {
-                    "level": f.level, "code": f.code, "joint": f.joint,
+                    "level": f.level, "code": f.code, "joint": f.joint, "joints": f.joints,
                     "message": f.message, "remedy": f.remedy,
                 }
                 for f in findings

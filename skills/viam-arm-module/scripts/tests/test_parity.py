@@ -178,6 +178,53 @@ def test_mesh_and_origin_divergences_are_deliberate(fixtures):
     assert m.dof == 1
 
 
+def test_joints_off_chain_is_a_deliberate_scope_divergence(fixtures):
+    # A THIRD deliberate, RECORDED divergence -- but of a different
+    # character than the mesh/origin pair above. Those two are about
+    # KINEMATIC FIDELITY (does armkit compute/accept what RDK computes/
+    # accepts), and armkit is more permissive there because it is *right*
+    # and RDK is not (or hasn't run yet). This one is about SCOPE, not
+    # fidelity: armkit's dof/chain() MATH still matches RDK exactly here --
+    # see test_declared_tip_case above, which verifies m.dof == 3 for this
+    # SAME fixture shape (trunk + 2 branch joints) against an equivalent
+    # SVA file with output_frames via the probe (RDK DoF=3). RDK counts
+    # every actuated frame in the whole tree because it models WHOLE
+    # ROBOTS; that counting is correct and unchanged here -- confirmed
+    # again below.
+    #
+    # What diverges is what `armkit validate` (the CLI layer --
+    # _armkit/checks.py's check_joints_off_chain, not this parsing/model
+    # layer) DOES with that number. armkit validates a VIAM ARM MODULE's
+    # kinematics: one serial chain, optionally with a tool attached -- not
+    # a general URDF/whole-robot validator. An actuated joint reachable
+    # from the root but NOT on the path to the declared tip (a gripper's
+    # fingers, shipped in the same URDF as the arm; a second arm on a
+    # dual-arm torso; a camera flange; a pump) is a real scope violation
+    # for that narrower target: a module built from this file would
+    # declare a DoF (via BFS, matching RDK) that its own
+    # GetKinematics/motion planning cannot actually drive past the chain
+    # path. `check_joints_off_chain` rejects it with an error --
+    # something RDK has no concept of and would never flag, since RDK is
+    # not scoped to "one arm" at all.
+    #
+    # armkit is right here in the same sense as the mesh/origin pair: not
+    # because its KINEMATICS diverge from RDK's (they don't -- m.dof below
+    # matches the probe-verified figure exactly), but because the CLI
+    # layer built on top of that kinematics enforces a scope RDK was never
+    # asked to enforce. See _armkit/checks.py:check_joints_off_chain for
+    # the full reasoning and tests/test_cli.py for CLI-level coverage
+    # (including the interaction with the multi-leaf --tip remedy: on a
+    # gripper-bearing file, following the fork-point suggestion resolves
+    # the STRUCTURE error and then surfaces THIS one -- the intended
+    # sequence, not a bug).
+    m = parse_urdf(fixtures / "two_leaf.urdf", tip="palm")
+    assert m.dof == 3  # matches RDK's own count -- kinematic parity intact
+    on_chain = {j.name for j in m.chain()}
+    assert on_chain == {"j0"}
+    off_chain = sorted(j.name for j in m.actuated_joints if j.name not in on_chain)
+    assert off_chain == ["jl", "jr"]  # what check_joints_off_chain would report
+
+
 def test_fk_does_not_enforce_joint_limits_yet(fixtures):
     # A THIRD divergence, recorded like the two above but of a different
     # character: RDK's Transform() validates each input against the
