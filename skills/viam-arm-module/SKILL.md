@@ -44,7 +44,7 @@ confirm what's actually implemented.
 
 | # | Phase | Artifact | Gate | Tooling |
 |---|---|---|---|---|
-| 0 | Triage | `docs/arm-brief.md` | On-ramp classified, DOF/joint order/units/limits/tool frame recorded, FK strategy and language both decided with justification | None -- manual |
+| 0 | Triage | `docs/arm-brief.md` | On-ramp classified, DOF/joint order/units/limits/tool frame recorded, FK strategy, language, and kinematics-file format all decided with justification | None -- manual |
 | 1 | Kinematics | `kinematics/<arm>.urdf` (or `.json` once SVA lands) | `armkit validate` passes | **`armkit validate` -- real, run it** |
 | 2 | Simulated model | `<ns>:<family>:<arm>-simulated` | Renders in the web app's 3D scene with its own meshes, joints slew, a motion plan executes -- no hardware. **Python: not as written, see note below** | None -- manual verification in the web app |
 | 3 | Real driver | `<ns>:<family>:<arm>` | Module reloads on real hardware, joints read back, one commanded move completes | None -- manual |
@@ -80,14 +80,19 @@ hand-roll single-flight cancellation there. Since this gate is already
 advisory, a Python or C++ module can ship without it passing, but don't
 imply cancel-other is a small lift in either language.
 
-## Phase 0: two decisions
+## Phase 0: three decisions
 
-Classify the on-ramp, then lock two decisions before writing `docs/arm-brief.md`:
+Classify the on-ramp, then lock three decisions before writing `docs/arm-brief.md`:
 
 **On-ramp** (one of):
 1. **Vendor URDF/xacro** -- common for ROS-supported arms (UR, xArm, Kinova)
 2. **Existing non-Viam driver** -- ROS2 driver, LeRobot config, MuJoCo MJCF to port
 3. **Vendor SDK/protocol only** -- serial/TCP protocol plus a datasheet
+4. **Existing Viam module, different language** -- e.g. porting a Go arm
+   module to Python. Uniquely gives you a working reference for behavior,
+   kinematics files already in a Viam-supported format, and Phases 0-1
+   largely pre-answered -- but not the driver itself, since the target SDK
+   differs from the one the reference module was built on.
 
 **FK strategy**, ranked cheapest first:
 1. Vendor controller reports TCP pose directly -- no dependency (UR, xArm)
@@ -95,14 +100,28 @@ Classify the on-ramp, then lock two decisions before writing `docs/arm-brief.md`
 3. Any language: delegate to the motion service -- works everywhere, costs a gRPC hop per call
 4. Hand-rolled FK -- last resort
 
-**Language** follows from the FK ladder but isn't forced by it: rungs 1 and 3
-work in any language, so the FK gap is a preference signal, not a hard
-constraint. Go remains the path of least resistance when the controller
-reports nothing, because rung 2 is free there and Python/C++ have no
-in-process FK today.
+These rungs describe what the vendor controller and language runtime can
+do, not what an existing module actually uses. The xArm controller reports
+TCP pose directly (rung 1), yet the Go xArm module computes `EndPosition`
+via `x.model.Transform(joints)` (rung 2) anyway, because rung 2 costs
+nothing in Go. Don't read a reference module's implementation as evidence
+the ladder is wrong -- read it as a language-specific choice within it.
+
+**The ladder informs language choice; it doesn't force it.** Rung 2
+(`model.Transform`) is Go-only; rungs 1 and 3 work in any language. So when
+the controller reports pose directly or a gRPC hop to the motion service is
+acceptable, language is a preference, not a constraint. Go remains the path
+of least resistance only when the controller reports nothing at all --
+rung 2 is free there, while Python and C++ have no in-process FK today.
+
+**Kinematics-file format**: URDF when the vendor ships one, or whenever
+there's mesh collision geometry to carry -- this is the default and needs
+no justification (see Enforced opinions, below). SVA only when forced: no
+URDF exists and the source doesn't map to one. Record which and why.
 
 Record DOF, joint order, units, limits, and tool frame in the brief. Gate:
-brief written, both decisions recorded with justification.
+brief written, on-ramp classified, and all three decisions recorded with
+justification.
 
 ### From a validated file to a module's kinematics
 
@@ -114,6 +133,20 @@ per language, and per-language `GetKinematics`/`Get3DModels` signatures,
 belong in `references/driver-reference.md` -- not yet written (Workstream B).
 Until it exists, read the file straight from disk relative to the module's
 working directory and treat packaging as a Phase 6 concern.
+
+**Units change at each of these boundaries, and converting between them is
+the module author's job -- nothing in the SDK does it for you:**
+
+| boundary | units |
+|---|---|
+| URDF source | metres, radians |
+| vendor SDK (e.g. xArm) | millimetres, degrees |
+| Viam arm API (`JointPositions`, `Pose`) | millimetres, degrees |
+
+Go's `referenceframe.Input` is radians internally, but a Python or C++
+driver talks to the Viam API directly, in millimetres and degrees -- get a
+conversion wrong here and the arm moves to a wildly wrong position with no
+error raised.
 
 ## Using armkit
 
