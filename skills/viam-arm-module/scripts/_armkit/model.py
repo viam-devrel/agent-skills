@@ -229,6 +229,15 @@ class KinematicModel:
 
     @property
     def dof(self) -> int:
+        """This is the RDK-parity count -- every actuated joint in the
+        tree, including joints on branches off the tip path. Viam
+        arm-module scope (every actuated joint on the chain to the tip) is
+        a product constraint enforced separately by
+        `_armkit.checks.check_joints_off_chain`, not here: this layer must
+        keep matching RDK exactly, since tests/test_parity.py and A10's
+        RDK cross-check both depend on it. Do not add scope filtering to
+        this property.
+        """
         return len(self.actuated_joints)
 
     def chain(self) -> list[Joint]:

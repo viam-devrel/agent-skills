@@ -301,8 +301,10 @@ def test_validate_off_chain_fixed_joints_do_not_trigger_the_check(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# joints-off-chain: a Viam arm module describes one arm, not a whole robot
-# (a gripper shipped attached in the same URDF is a separate component).
+# joints-off-chain: a Viam arm module describes one arm, not a whole robot.
+# armkit does not know WHY a model branches (gripper, second arm, camera or
+# tool mount all produce this same shape) -- the remedy names the concrete
+# consequence (arity mismatch) rather than guessing a cause.
 # ---------------------------------------------------------------------------
 
 def test_validate_joints_off_chain_error_and_names_the_joints(fixtures):
@@ -312,6 +314,111 @@ def test_validate_joints_off_chain_error_and_names_the_joints(fixtures):
     assert "'palm'" in r.stdout            # names the declared tip
     assert "'jl'" in r.stdout and "'jr'" in r.stdout   # names the offending joints
     assert "2 actuated joints" in r.stdout or "2 actuated joint" in r.stdout
+
+
+def test_validate_joints_off_chain_remedy_does_not_assert_a_cause(fixtures):
+    # Second review round on this same class of issue (the --tip remedy
+    # previously named a leaf as though armkit knew it was the intended end
+    # effector): the remedy must not assert WHY the model branches. It may
+    # OFFER likely explanations (hedged, "usually"), but never assert one
+    # as fact -- a dual-arm robot's off-chain joints are not "a gripper".
+    r = run("validate", str(fixtures / "two_leaf.urdf"), "--tip", "palm")
+    assert "a gripper is a" not in r.stdout   # old, asserted-as-fact wording
+    assert "usually belong to a separate" in r.stdout
+    assert "a gripper, a second arm, a camera or tool mount" in r.stdout
+    # Names the actual stake instead of a guessed cause.
+    assert "fewer" in r.stdout and "DoF" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# joints-off-chain: when off-chain joints outnumber on-chain ones, the
+# declared --tip is probably wrong, not just the file out of scope (the
+# dual-arm case: the fork-point --tip suggestion leads straight to this).
+# ---------------------------------------------------------------------------
+
+def test_validate_joints_off_chain_suggests_alternate_tip_when_mostly_off_chain(tmp_path):
+    # A dual-arm shape: base -> link1 (single trunk joint), then link1
+    # forks into two independent 2-joint arms. Declaring --tip at the fork
+    # point itself (as the multi-leaf remedy's _first_fork_link would
+    # suggest) leaves 4 of 5 actuated joints off-chain -- more off than on.
+    path = write_urdf(tmp_path, """
+    <robot name="dual_arm">
+      <link name="base"/><link name="link1"/>
+      <link name="armA1"/><link name="armA2"/>
+      <link name="armB1"/><link name="armB2"/>
+      <joint name="trunk" type="revolute">
+        <parent link="base"/><child link="link1"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="jointA1" type="revolute">
+        <parent link="link1"/><child link="armA1"/>
+        <origin xyz="0 0.1 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="jointA2" type="revolute">
+        <parent link="armA1"/><child link="armA2"/>
+        <origin xyz="0.1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="jointB1" type="revolute">
+        <parent link="link1"/><child link="armB1"/>
+        <origin xyz="0 -0.1 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="jointB2" type="revolute">
+        <parent link="armB1"/><child link="armB2"/>
+        <origin xyz="0.1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    r = run("validate", str(path), "--tip", "link1")
+    assert r.returncode == 1
+    assert "joints-off-chain" in r.stdout
+    assert "more joints are off the chain than on it" in r.stdout
+    assert "'--tip link1' is probably not your" in r.stdout
+    assert "try one of: armA2, armB2" in r.stdout
+
+
+def test_validate_joints_off_chain_no_alternate_tip_suggestion_when_mostly_on_chain(tmp_path):
+    # The conditional line must NOT appear when off-chain joints are the
+    # MINORITY -- the real mycobot-gripper shape (6 actuated joints on the
+    # chain, 1 off, the gripper's own actuated joint). A 3-joint serial arm
+    # ending at "toolmount", which forks off ONE more actuated joint to a
+    # "gripper" leaf, reproduces that ratio (3 on-chain, 1 off-chain).
+    path = write_urdf(tmp_path, """
+    <robot name="mostly_on_chain">
+      <link name="base"/><link name="mid1"/><link name="mid2"/>
+      <link name="toolmount"/><link name="gripper_leaf"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="mid1"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j2" type="revolute">
+        <parent link="mid1"/><child link="mid2"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="j3" type="revolute">
+        <parent link="mid2"/><child link="toolmount"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="gripper_controller" type="revolute">
+        <parent link="toolmount"/><child link="gripper_leaf"/>
+        <origin xyz="0.1 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+    </robot>
+    """)
+    r = run("validate", str(path), "--tip", "toolmount")
+    assert r.returncode == 1
+    assert "joints-off-chain" in r.stdout
+    assert "'gripper_controller'" in r.stdout
+    assert "try one of" not in r.stdout
+    assert "more joints are off the chain than on it" not in r.stdout
 
 
 def test_validate_plain_single_arm_files_unaffected_by_off_chain_check(fixtures):

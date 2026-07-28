@@ -286,7 +286,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     findings: list[Finding] = []
     findings += check_dof(actuated, args.expect_dof)
-    findings += check_joints_off_chain(chain, actuated, tip)
+    findings += check_joints_off_chain(model, chain, actuated, tip)
     findings += check_joint_limits(actuated)
     findings += check_unit_scale(model, chain)
 

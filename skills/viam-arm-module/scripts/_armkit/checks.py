@@ -133,7 +133,9 @@ def check_dof(actuated: list[Joint], expect_dof: int | None) -> list[Finding]:
     return []
 
 
-def check_joints_off_chain(chain: list[Joint], actuated: list[Joint], tip: str) -> list[Finding]:
+def check_joints_off_chain(
+    model: KinematicModel, chain: list[Joint], actuated: list[Joint], tip: str,
+) -> list[Finding]:
     """joints-off-chain: an actuated joint that is not on the resolved tip's
     root-to-tip path.
 
@@ -145,11 +147,10 @@ def check_joints_off_chain(chain: list[Joint], actuated: list[Joint], tip: str) 
     over the WHOLE frame system, per A3b) deliberately matches RDK's own
     DoF, because RDK models whole robots where a branch's joints
     legitimately consume input slots. A Viam arm module is not a whole
-    robot: a gripper shipped attached to the arm in the SAME URDF is a
-    SEPARATE Viam component with its own JointPositions arity, and folding
-    its joint(s) into the arm's declared DoF produces a module whose
-    GetKinematics/motion planning can only actually drive the chain path,
-    not the full (BFS) count it claims.
+    robot: an actuated joint off the chain means JointPositions will
+    return fewer values than the module's own declared DoF -- an arity
+    mismatch in GetKinematics and in motion planning, regardless of what
+    that off-chain joint actually IS.
 
     Error level, not warn -- the user's own call: the most common real
     input is a vendor URDF with the gripper still attached, and passing
@@ -174,21 +175,49 @@ def check_joints_off_chain(chain: list[Joint], actuated: list[Joint], tip: str) 
     findings (or into `joint` by picking one arbitrarily) would fight the
     single-message shape without adding information a consumer couldn't
     already get from `joints`. `joint` stays None on this finding.
+
+    The remedy does NOT assert why the model branches (a gripper, a
+    second arm, a camera or tool mount all produce this exact shape --
+    armkit cannot tell which, the same class of overclaiming the --tip
+    remedy used to make about which leaf is the "real" end effector; see
+    _structure_finding). It DOES name the concrete consequence (arity
+    mismatch) so the stakes are clear without a guess.
+
+    When off-chain joints OUTNUMBER on-chain ones, the declared tip is far
+    more likely wrong than the file is out of scope (a dual-arm robot
+    whose fork point was suggested as --tip, per _first_fork_link, is the
+    motivating case: 12 of 13 actuated joints end up off-chain). The
+    remedy adds a conditional line for exactly this shape, suggesting the
+    model's actual leaves as alternative --tip candidates -- reusing the
+    same leaf computation _require_resolvable_tip uses for the multi-leaf
+    diagnosis, so the suggestion always names real, valid --tip targets.
     """
     chain_names = {j.name for j in chain}
     off_chain = [j.name for j in actuated if j.name not in chain_names]
     if not off_chain:
         return []
     count = len(off_chain)
+    on_chain_count = len(actuated) - count
     message = (
         f"{count} actuated joint{'s' if count != 1 else ''} "
         f"{'is' if count == 1 else 'are'} not on the arm's chain to {tip!r}: {off_chain!r}."
     )
-    remedy = (
-        "-> A Viam arm module's kinematics must describe only the arm -- a gripper is a\n"
-        "   separate component. Remove the off-chain joints from the file, or set --tip\n"
-        "   to a link further out if they are genuinely part of the arm."
-    )
+    remedy_lines = [
+        "-> A Viam arm module's kinematics must describe one serial arm: every actuated",
+        "   joint must lie on the chain to the tip, or JointPositions will return fewer",
+        "   values than the declared DoF. Off-chain joints usually belong to a separate",
+        "   component (a gripper, a second arm, a camera or tool mount). Remove them from",
+        "   the file, or set --tip further out if they are genuinely part of this arm.",
+    ]
+    if count > on_chain_count:
+        parent_links = {j.parent for j in model.joints}
+        child_links = {j.child for j in model.joints}
+        leaves = sorted(child_links - parent_links)
+        remedy_lines += [
+            f"   more joints are off the chain than on it -- '--tip {tip}' is probably not your",
+            f"   arm's output frame; try one of: {', '.join(leaves)}",
+        ]
+    remedy = "\n".join(remedy_lines)
     return [Finding("error", "joints-off-chain", message, joints=off_chain, remedy=remedy)]
 
 
