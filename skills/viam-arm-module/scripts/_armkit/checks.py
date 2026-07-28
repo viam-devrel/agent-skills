@@ -213,9 +213,13 @@ def check_joints_off_chain(
         parent_links = {j.parent for j in model.joints}
         child_links = {j.child for j in model.joints}
         leaves = sorted(child_links - parent_links)
+        # Blank line + "note:" marker -- purely presentational, so this
+        # file-specific observation doesn't read as a run-on continuation
+        # of the general guidance above it.
         remedy_lines += [
-            f"   more joints are off the chain than on it -- '--tip {tip}' is probably not your",
-            f"   arm's output frame; try one of: {', '.join(leaves)}",
+            "",
+            f"   note: more joints are off the chain than on it -- '--tip {tip}' is probably not your",
+            "         arm's output frame; try one of: " + ", ".join(leaves),
         ]
     remedy = "\n".join(remedy_lines)
     return [Finding("error", "joints-off-chain", message, joints=off_chain, remedy=remedy)]
