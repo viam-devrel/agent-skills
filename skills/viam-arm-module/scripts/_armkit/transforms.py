@@ -15,16 +15,24 @@ a future orientation-vector task, whose five orientation types include
 Viam's own orientation-vector format, which only this library speaks
 natively.
 
-**Layout trap:** `viam.spatialmath.RotationMatrix.elements` is
-COLUMN-major, despite that class's own docstring claiming
-`elements[3*row + col]` (row-major) -- the buffer is nalgebra's, not
-whatever the docstring assumes. Reshaping it as documented (row-major)
-silently yields the TRANSPOSE of the intended rotation -- for a
-rotation matrix, its own inverse -- with no exception raised. Both
-functions below reshape with `order="F"` to compensate; see
-`tests/test_transforms.py::test_viam_spatialmath_rotation_matrix_elements_are_column_major`
-for the dedicated test pinning this, and what breaks if the buffer
-order ever changes.
+**Why this reads `Quaternion.w/i/j/k`, never `RotationMatrix.elements`:**
+`elements` is a flat 9-value buffer whose row-vs-column-major layout is
+an FFI implementation detail, not part of any documented contract --
+and it is NOT stable. viam-sdk 0.79.2 handed back a column-major
+buffer (despite the class's own docstring claiming row-major);
+viam-sdk 0.80.0 flipped it to genuinely row-major, silently, with no
+deprecation or version note. A `reshape(..., order="F")` written to
+compensate for 0.79.2's layout became WRONG the moment 0.80.0 shipped
+-- every rotation silently became its own transpose (for an orthogonal
+matrix, its inverse), with no exception anywhere, on a `viam-sdk>=0.79`
+floor that resolves 0.80.0 on any cold install today. `Quaternion`'s
+`w`/`i`/`j`/`k` are individually-named scalar accessors, not a buffer a
+caller has to guess the layout of -- reconstructing the 3x3 from those
+four numbers (see `_matrix_from_quaternion` below) is layout-agnostic
+by construction and measured identical (max diff 1.1e-16) on both
+0.79.2 and 0.80.0. A future reader who sees an unused `RotationMatrix`
+import and is tempted to "simplify" back to `.elements`: don't --
+that's exactly the footgun this function exists to avoid.
 """
 from __future__ import annotations
 
@@ -34,15 +42,26 @@ from viam.spatialmath import AxisAngle, EulerAngles
 M_TO_MM = 1000.0
 
 
+def _matrix_from_quaternion(q) -> np.ndarray:
+    """viam.spatialmath Quaternion -> 3x3 rotation, via its scalar w/i/j/k
+    accessors -- never via RotationMatrix.elements (see module docstring).
+    """
+    w, x, y, z = q.w, q.i, q.j, q.k
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ])
+
+
 def rpy_to_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
     """URDF fixed-axis roll-pitch-yaw -> 3x3 rotation.
 
-    Delegates to viam.spatialmath's EulerAngles -> Quaternion ->
-    RotationMatrix conversion (the same conversion RDK itself uses),
-    rather than hand-building Rz @ Ry @ Rx in numpy.
+    Delegates to viam.spatialmath's EulerAngles -> Quaternion conversion
+    (the same conversion RDK itself uses) rather than hand-building
+    Rz @ Ry @ Rx in numpy.
     """
-    elements = EulerAngles(roll, pitch, yaw).to_quaternion().to_rotation_matrix().elements
-    return np.array(elements).reshape(3, 3, order="F")
+    return _matrix_from_quaternion(EulerAngles(roll, pitch, yaw).to_quaternion())
 
 
 def axis_angle_to_matrix(axis: np.ndarray, angle: float) -> np.ndarray:
@@ -55,8 +74,7 @@ def axis_angle_to_matrix(axis: np.ndarray, angle: float) -> np.ndarray:
     composes them and they must agree on convention -- and now both
     delegate to the same canonical backend.
     """
-    elements = AxisAngle(axis[0], axis[1], axis[2], angle).to_quaternion().to_rotation_matrix().elements
-    return np.array(elements).reshape(3, 3, order="F")
+    return _matrix_from_quaternion(AxisAngle(axis[0], axis[1], axis[2], angle).to_quaternion())
 
 
 def matrix_to_wxyz_quaternion(r: np.ndarray) -> np.ndarray:
@@ -65,15 +83,15 @@ def matrix_to_wxyz_quaternion(r: np.ndarray) -> np.ndarray:
     largest diagonal entry, avoiding the sqrt-of-a-small-or-negative-number
     issue a single naive formula runs into near 180-degree rotations.
 
-    Plain numpy, not a round-trip through viam.spatialmath's RotationMatrix
-    -- that class's CONSTRUCTOR direction (Python floats -> native buffer)
-    is unverified, whereas this module's other two functions only ever use
-    its READ direction (proven column-major, pinned by
-    test_viam_spatialmath_rotation_matrix_elements_are_column_major).
-    Avoiding a second, differently-unverified native-buffer layout in
-    output a human or an agent reads directly was a deliberate call, not an
-    oversight -- see armkit.py validate's --at pose output, the only
-    caller that needs this direction at all.
+    Plain numpy, not a round-trip through viam.spatialmath's
+    RotationMatrix. This module no longer reads RotationMatrix.elements
+    at all (see the module docstring: its buffer layout flipped between
+    viam-sdk 0.79.2 and 0.80.0 with no warning), so introducing it here
+    -- in the reverse, CONSTRUCTOR direction, which was never verified
+    in the first place -- would reintroduce exactly the class of risk
+    the rest of this module was rewritten to avoid, for a caller (the
+    CLI's --at pose output) that has no need of the native library at
+    all: this is pure quaternion algebra, not an FFI call.
 
     Previously implemented twice, independently, by armkit.py's --at pose
     output and tests/test_fk.py's assert_pose_matches -- they agreed

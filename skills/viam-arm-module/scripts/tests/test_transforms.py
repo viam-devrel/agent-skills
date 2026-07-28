@@ -130,13 +130,15 @@ def test_axis_angle_is_orthonormal_rotation(axis, angle):
 ])
 def test_ffi_rpy_matches_reference_oracle(roll, pitch, yaw):
     # The FFI-backed rpy_to_matrix must agree with the pre-FFI, RDK-proven
-    # pure-numpy implementation on the actual ROTATION, not on any buffer
-    # layout -- this is the mathematical counterpart to
-    # test_viam_spatialmath_rotation_matrix_elements_are_column_major below,
-    # which instead pins the SDK's raw layout. Together: the layout test
-    # catches an SDK-side buffer change at its source; this one catches any
-    # mathematical divergence regardless of cause (a layout change the
-    # layout test somehow missed, a different SDK bug entirely, etc.).
+    # pure-numpy implementation on the actual ROTATION -- this is a
+    # version-independent property (it makes no assumption about how the
+    # SDK represents a rotation internally), unlike a test pinning
+    # RotationMatrix.elements' buffer layout, which is exactly what broke
+    # between viam-sdk 0.79.2 and 0.80.0 (see transforms.py's module
+    # docstring) and is why transforms.py no longer reads that buffer at
+    # all. This oracle comparison is what actually caught that break: it
+    # fails on both versions if rpy_to_matrix disagrees with the reference,
+    # regardless of which buffer convention is currently in fashion.
     # 1e-12 because the measured max delta across the full RDK-verified
     # corpus was exactly 0.0 -- anything looser here would be hiding
     # something, not tolerating noise.
@@ -172,56 +174,22 @@ def test_ffi_axis_angle_matches_reference_oracle(axis, angle):
     assert np.allclose(actual, expected, atol=1e-12), (actual, expected)
 
 
-def test_viam_spatialmath_rotation_matrix_elements_are_column_major():
-    """Pins the actual (undocumented) layout of viam.spatialmath's
-    RotationMatrix.elements, independent of anything in transforms.py.
-
-    RotationMatrix's own class docstring claims `elements[3*row + col]`
-    (row-major) -- that is WRONG. The buffer underneath is nalgebra's,
-    which is column-major. rpy_to_matrix/axis_angle_to_matrix both
-    reshape the raw `elements` list with order="F" to compensate.
-
-    If a future SDK release ever actually fixes this (making `elements`
-    genuinely row-major, matching its own docstring), reshaping with
-    order="F" would silently start producing the TRANSPOSE of the
-    intended rotation -- for an orthogonal matrix, its own inverse --
-    with no exception raised anywhere in the call chain. A quaternion
-    comparison cannot catch this (quaternions carry no buffer layout),
-    which is exactly why this test exists: it pins the raw layout
-    directly against a hand-known rotation matrix, bypassing
-    transforms.py's own reshape entirely, so a layout change shows up
-    here first, as a loud failure, instead of downstream as a silently
-    inverted pose.
-
-    See test_ffi_rpy_matches_reference_oracle /
-    test_ffi_axis_angle_matches_reference_oracle above for the
-    complementary check: this test catches an SDK-side buffer change at
-    its source, those catch any mathematical divergence regardless of
-    cause. Neither subsumes the other -- keep both.
-    """
-    import viam.spatialmath as sm
-
-    # 90-degree yaw about Z -- same known matrix as
-    # test_rpy_yaw_quarter_turn/test_axis_angle_quarter_turn_about_z.
-    expected = np.array([
-        [0.0, -1.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
-    elements = sm.EulerAngles(0.0, 0.0, np.pi / 2).to_quaternion().to_rotation_matrix().elements
-    assert len(elements) == 9
-
-    col_major = np.array(elements).reshape(3, 3, order="F")
-    row_major = np.array(elements).reshape(3, 3)
-
-    assert np.allclose(col_major, expected, atol=1e-9)
-    # The trap, pinned explicitly: reading the buffer as the SDK's own
-    # docstring claims (row-major) gives the TRANSPOSE, not the matrix.
-    # If this assertion ever fails, the SDK's layout changed and
-    # rpy_to_matrix/axis_angle_to_matrix's order="F" reshape must be
-    # revisited before anything else in this file is trusted.
-    assert np.allclose(row_major, expected.T, atol=1e-9)
-    assert not np.allclose(row_major, expected, atol=1e-3)
+# REMOVED: test_viam_spatialmath_rotation_matrix_elements_are_column_major
+# used to live here, pinning RotationMatrix.elements as column-major on
+# viam-sdk 0.79.2. viam-sdk 0.80.0 flipped that buffer to row-major --
+# silently, no deprecation, no version note -- which made that test both
+# WRONG (asserting something now false) and beside the point: it pinned an
+# FFI implementation detail transforms.py no longer depends on at all.
+# rpy_to_matrix/axis_angle_to_matrix now go through Quaternion's w/i/j/k
+# scalar accessors instead of RotationMatrix.elements (see transforms.py's
+# module docstring for the full incident writeup), so there is no buffer
+# layout left to pin here. test_ffi_rpy_matches_reference_oracle and
+# test_ffi_axis_angle_matches_reference_oracle above are the replacement:
+# they assert the property that actually matters -- the FFI's rotation
+# agrees with the RDK-proven numpy reference -- which holds regardless of
+# how any given SDK version represents a rotation internally, and it is
+# exactly what caught this incident (23 failures under 0.80.0, including
+# these two tests).
 
 
 # ---------------------------------------------------------------------------
