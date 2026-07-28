@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import traceback
 from pathlib import Path
 
 from _armkit.checks import (
@@ -388,12 +389,40 @@ def _report(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    if args.command is None:
-        parser.print_help()
-        return 0
-    return args.func(args)
+    try:
+        parser = _build_parser()
+        args = parser.parse_args(argv)
+        if args.command is None:
+            parser.print_help()
+            return 0
+        return args.func(args)
+    except Exception:
+        # Anything reaching here is a genuine armkit bug, not a bad input
+        # file: every expected failure mode is caught upstream as a
+        # ValueError (parse_urdf, forward_kinematics) and turned into a
+        # Finding, or is argparse's own SystemExit (a BaseException, not
+        # an Exception -- NOT caught here, so --help/--version/usage
+        # errors are unaffected).
+        #
+        # Importing viam (pulled in by _armkit/transforms.py for
+        # spatialmath) installs its OWN sys.excepthook at import time:
+        # left alone, an uncaught exception here prints an ANSI-colored,
+        # timestamped traceback attributed to "viam (__init__.py:34)" --
+        # so an armkit bug reads as an SDK failure and a user's report
+        # lands in the wrong repository. Catching here instead of
+        # restoring sys.excepthook survives the SDK changing its
+        # import-time behavior, and lets the message carry the version
+        # string, which is what actually makes a report actionable.
+        #
+        # The traceback itself is printed IN FULL, not suppressed --
+        # someone debugging this needs it. Only the attribution changes.
+        traceback.print_exc()
+        print(
+            f"\narmkit {ARMKIT_VERSION} internal error -- please report this "
+            "(see the traceback above)",
+            file=sys.stderr,
+        )
+        return 2
 
 
 if __name__ == "__main__":

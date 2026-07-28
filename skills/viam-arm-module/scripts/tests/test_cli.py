@@ -12,6 +12,7 @@ see its docstring for why `--isolated` alone does not achieve this.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -31,6 +32,19 @@ def run(*args):
         [sys.executable, str(ARMKIT), *args],
         capture_output=True, text=True,
     )
+
+
+def _load_armkit_module():
+    """Load armkit.py as an importable module object (a fresh one per
+    call), rather than shelling out. Only used by
+    test_internal_crash_is_attributed_to_armkit_not_viam below, which needs
+    to monkeypatch an internal function to simulate a genuine armkit bug --
+    something a subprocess-based `run()` call has no clean way to do.
+    """
+    spec = importlib.util.spec_from_file_location("armkit_under_test", ARMKIT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def write_urdf(tmp_path, xml, name="test.urdf"):
@@ -885,3 +899,41 @@ def test_native_library_load_failure_exits_2_with_platform_message(fixtures, tmp
     )
     assert r.returncode == 2, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert "Linux" in r.stderr and "macOS" in r.stderr and "Windows" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# A genuine internal bug (NOT a ValueError from a bad user file -- those are
+# all caught upstream) must be attributed to armkit, not misattributed to
+# viam by the SDK's own sys.excepthook, and must exit 2 (an internal crash
+# is not a statement about the user's file).
+# ---------------------------------------------------------------------------
+
+def test_internal_crash_is_attributed_to_armkit_not_viam(monkeypatch, capsys, fixtures):
+    # Simulated by monkeypatching cmd_validate to raise directly, on a
+    # module object loaded via _load_armkit_module() rather than shelling
+    # out -- there is no clean, non-fragile way to inject a real internal
+    # bug into a subprocess run. This exercises main()'s actual
+    # `except Exception` handler for real, not a re-implementation of it.
+    mod = _load_armkit_module()
+
+    def _boom(args):
+        raise RuntimeError("simulated internal armkit bug for this test")
+
+    monkeypatch.setattr(mod, "cmd_validate", _boom)
+
+    exit_code = mod.main(["validate", str(fixtures / "two_link.urdf")])
+
+    assert exit_code == 2   # an internal crash, not a verdict about the file
+    captured = capsys.readouterr()
+    # The traceback is NOT suppressed -- someone debugging this needs it.
+    assert "Traceback (most recent call last)" in captured.err
+    assert "RuntimeError" in captured.err
+    assert "simulated internal armkit bug for this test" in captured.err
+    # And it is unambiguously attributed to armkit, by name and version --
+    # not left to viam's own sys.excepthook (installed when _armkit/
+    # transforms.py imports viam.spatialmath), which would otherwise print
+    # an ANSI-colored, timestamped line reading "viam (__init__.py:34)
+    # [ERROR] Uncaught exception".
+    assert f"armkit {mod.ARMKIT_VERSION}" in captured.err
+    assert "internal error" in captured.err
+    assert "viam (__init__.py" not in captured.err
