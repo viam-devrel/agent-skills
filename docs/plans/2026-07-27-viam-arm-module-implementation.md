@@ -1237,7 +1237,25 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 | `zero-limits` | error | actuated joint with `lower == upper` |
 | `inverted-limits` | error | `lower > upper` |
 | `unresolved-mesh` | warn | mesh reference that does not resolve on disk |
-| `heavy-mesh` | warn | resolved collision mesh over 5 000 triangles |
+| `heavy-mesh` | warn | resolved collision mesh over a threshold — **see the measured distribution below; 5 000 was a bad guess** |
+
+> **The original 5 000-triangle threshold was invented, and A6 measured why it is wrong.**
+> Across 913 successfully-loaded meshes from 56 real vendor URDFs:
+>
+> | min | p10 | p25 | median | p75 | p90 | p95 | max |
+> |---|---|---|---|---|---|---|---|
+> | 2 636 | 3 542 | 7 916 | **17 601** | 33 292 | 58 122 | 127 177 | 448 644 |
+>
+> 5 000 sits below the 10th percentile — nearly every real vendor mesh would trip it, so
+> the warning would fire on almost every file and mean nothing. Pick a threshold in the
+> **p90–p95 band (~60 000–130 000)** to flag genuine outliers, and state in the finding
+> that the number is empirical rather than a spec limit.
+>
+> Other A6 corpus data worth having in A8: of 1 024 mesh references, **89% resolved and
+> loaded, 3% resolved but failed to load, 8% did not resolve**. All 31 load failures trace
+> to 8 distinct broken vendor COLLADA files (`DaeBrokenRefError: Material not found`) —
+> defects in the vendor's own files, not in armkit. The unresolved cases are real
+> `package://` path mismatches, including 100% of UR mesh references in this checkout.
 | `dh-format` | warn | `kinematic_param_type: "DH"` — supported but not recommended |
 | `missing-limits` | error | actuated, non-`continuous` joint whose `lower`/`upper` are `None` |
 | `structure` | error | `chain()` raised — branching, cycle, multiple roots, or disconnection |
