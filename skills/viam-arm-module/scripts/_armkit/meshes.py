@@ -32,22 +32,60 @@ An unresolvable path is reported with `resolved=False`, not raised.
 **Loading and the three-way state.** A mesh reference is in one of three
 states, not two:
   1. `resolved=False` -- no file found at the resolved path at all.
-  2. `resolved=True, load_error=<str>` -- a file exists there, but
-     trimesh either raised loading it (e.g. malformed COLLADA XML) OR
-     loaded it "successfully" into a mesh with zero triangles (trimesh's
-     own behavior for e.g. plain-text content given an .stl extension --
-     it does NOT raise for that, it silently returns an empty scene, so
-     this module checks explicitly rather than relying on exceptions
-     alone). `triangles`/`bbox_mm` stay None; `bytes` (a plain disk stat,
-     no trimesh needed) and `origin_offset_mm` (from the URDF, not the
-     mesh file) are still populated.
+  2. `resolved=True, load_error=<str>` -- a file exists there, but it was
+     never turned into a loaded mesh, for one of two reasons: trimesh
+     either raised loading it (e.g. malformed COLLADA XML) or loaded it
+     "successfully" into a mesh with zero triangles (trimesh's own
+     behavior for e.g. plain-text content given an .stl extension -- it
+     does NOT raise for that, it silently returns an empty scene, so this
+     module checks explicitly rather than relying on exceptions alone) --
+     OR loading was never attempted at all, because `inspect_meshes` was
+     called with `load=False` (see below); `load_error` is then set to a
+     fixed "not loaded" message rather than left None, specifically so
+     this state reads uniformly regardless of WHY the mesh never became
+     available, and so `MeshReport.loaded` (below) is False for all of
+     it. `triangles`/`bbox_mm` stay None in every sub-case; `bytes` (a
+     plain disk stat, no trimesh needed) and `origin_offset_mm` (from the
+     URDF, not the mesh file) are still populated.
   3. `resolved=True, load_error=None` -- loaded cleanly; every field is
      populated.
 This third state matters because it is a DIFFERENT failure than a
 missing file -- "the path is right but the asset is broken" needs a
 different fix than "the path is wrong" -- and collapsing it into either
 of the other two would lose that distinction for whoever reads the
-report (A8).
+report (A8). Use `MeshReport.loaded` to test for state 3 specifically;
+`resolved` alone does not imply `triangles is not None`.
+
+**The `load` parameter -- resolution is orders of magnitude cheaper than
+loading.** Measured on a real 14-reference mycobot URDF
+(mycobot_adaptive_gripper.urdf): parsing the file is ~0.3 ms, resolving
+all 14 mesh paths against disk (this function with `load=False`) is
+~0.3 ms, and loading all 14 through trimesh (`load=True`, with the
+caching below already applied) is ~110 ms on this machine with the mesh
+files already in the OS page cache from earlier corpus-wide scans --
+call it 300-1500x depending on disk cache state, not a fixed constant.
+`unresolved-mesh` -- the finding this module exists to enable, and the
+single biggest PASS-vs-RDK-loads gap per the acceptance review that
+motivated it -- needs only resolution. `inspect_meshes(model,
+load=False)` skips trimesh entirely: every mesh reference is still
+resolved against disk (so `resolved`/`resolved_path`/`bytes`/
+`origin_offset_mm` are exactly as if `load=True`), but nothing is
+loaded, so `triangles`/`bbox_mm` stay None and `load_error` carries the
+fixed "not loaded" message described above. `validate` (a hot path an
+agent may run repeatedly) should call this with `load=False`; only a
+`meshes`/`heavy-mesh`-style consumer that actually needs geometry should
+pay the loading cost.
+
+**Caching.** Vendors commonly reference the SAME mesh file from both
+<visual> and <collision> on a link (or reuse one mesh across several
+links). Measured on that same 14-reference URDF: only 7 distinct files;
+loading each of the 14 references independently (no caching) took
+~183 ms, loading the 7 distinct files once each and reusing the result
+(this function's cache, keyed on resolved path, scoped to a single call)
+took ~108 ms -- a real reduction, though not exactly half, since loading
+cost isn't uniform across files. This lives here, not in a caller,
+because it is purely an artifact of how this function walks the model,
+not a policy choice A8 should own.
 
 **Units.** Internal values are always mm (see model.py's module
 docstring) -- but mesh files are not uniformly one unit. Measured, not
@@ -83,6 +121,15 @@ from .model import KinematicModel
 from .transforms import M_TO_MM
 
 
+# Fixed load_error text for the "resolved but never attempted" sub-state
+# (inspect_meshes(..., load=False)) -- distinct from any real trimesh/
+# pycollada failure message, but deliberately still a non-None
+# load_error, so MeshReport.loaded is False for it exactly like a real
+# load failure: both leave triangles/bbox_mm unavailable, for a consumer
+# that only cares whether it can read those fields, not why it can't.
+NOT_LOADED = "not loaded (inspect_meshes called with load=False)"
+
+
 @dataclass
 class MeshReport:
     link: str
@@ -90,7 +137,11 @@ class MeshReport:
     kind: str                          # "visual" | "collision"
     resolved: bool
     resolved_path: str | None = None   # absolute path on disk, when resolved
-    load_error: str | None = None      # set when resolved but trimesh couldn't load it
+    # None when resolved=False (not applicable) or state 3 (loaded clean);
+    # a string otherwise -- a real trimesh/pycollada failure, OR the fixed
+    # NOT_LOADED text when load=False skipped loading entirely. Use
+    # `loaded`, not this field directly, to test for state 3.
+    load_error: str | None = None
     triangles: int | None = None
     # (min_xyz, max_xyz), each an (x, y, z) tuple, mesh-local frame, mm.
     bbox_mm: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
@@ -99,6 +150,20 @@ class MeshReport:
     # default -- NOT derived from the mesh geometry itself.
     origin_offset_mm: tuple[float, float, float] | None = None
     bytes: int | None = None           # file size on disk; independent of trimesh
+
+    @property
+    def loaded(self) -> bool:
+        """True only when the file was found AND actually turned into a
+        loaded mesh (state 3) -- `triangles`/`bbox_mm` are non-None
+        exactly when this is True. False for an unresolved path, a real
+        load failure, and a resolved-but-not-attempted report
+        (load=False) alike: all three leave triangles/bbox_mm at None,
+        and this is the safe way to guard access to them without having
+        to separately check `resolved` and `load_error` (which, taken
+        alone, do not imply `triangles is not None`) or risk a TypeError
+        comparing None against a threshold.
+        """
+        return self.resolved and self.load_error is None
 
 
 def _resolve_package_uri(urdf_dir: Path, uri: str) -> Path | None:
@@ -186,8 +251,34 @@ def _load_geometry_mm(path: Path):
     return mesh
 
 
-def inspect_meshes(model: KinematicModel) -> list[MeshReport]:
-    """Every mesh reference in `model`, resolved and inspected against disk.
+_CacheEntry = tuple[int, tuple, str | None]  # (triangles, bbox_mm, load_error)
+
+
+def _load_geometry_cached(cache: dict[Path, _CacheEntry], resolved_path: Path) -> _CacheEntry:
+    """`_load_geometry_mm`, memoized per resolved path within one
+    `inspect_meshes` call -- see the module docstring's Caching section
+    for why (the same file is commonly referenced by both <visual> and
+    <collision>, or reused across links, and trimesh loading is the
+    expensive part of this module by ~3 orders of magnitude).
+    """
+    if resolved_path in cache:
+        return cache[resolved_path]
+    try:
+        mesh = _load_geometry_mm(resolved_path)
+        lo, hi = mesh.bounds
+        entry: _CacheEntry = (
+            len(mesh.faces),
+            (tuple(float(v) for v in lo), tuple(float(v) for v in hi)),
+            None,
+        )
+    except ValueError as e:
+        entry = (None, None, str(e))
+    cache[resolved_path] = entry
+    return entry
+
+
+def inspect_meshes(model: KinematicModel, *, load: bool = True) -> list[MeshReport]:
+    """Every mesh reference in `model`, resolved and (by default) loaded.
 
     Reads only Link.visual_meshes/collision_meshes/visual_mesh_origins/
     collision_mesh_origins (populated by urdf.py at parse time) -- this
@@ -195,15 +286,32 @@ def inspect_meshes(model: KinematicModel) -> list[MeshReport]:
     (dict iteration order, i.e. declaration order in the file), visual
     references before collision, each in file order -- deterministic, not
     load-bearing.
+
+    `load=False` skips trimesh entirely (see the module docstring's `load`
+    section for the measured cost gap -- three orders of magnitude on
+    this machine, more with a cold disk cache): every reference is still
+    resolved against disk, but `triangles`/`bbox_mm` stay None and
+    `load_error` is set to the fixed NOT_LOADED text. Use this for
+    anything that only needs `unresolved-mesh` (e.g. `validate`); loading
+    is for a consumer that actually needs geometry (e.g. `heavy-mesh`).
     """
     urdf_dir = Path(model.source_path).resolve().parent
     reports: list[MeshReport] = []
+    cache: dict[Path, _CacheEntry] = {}
 
     for link in model.links.values():
         for kind, paths, origins in (
             ("visual", link.visual_meshes, link.visual_mesh_origins),
             ("collision", link.collision_meshes, link.collision_mesh_origins),
         ):
+            # paths/origins are populated together, in lockstep, by
+            # urdf.py's _mesh_refs -- this assert is cheap insurance
+            # against a future desync silently truncating one of them via
+            # zip() below, rather than a case expected to fire today.
+            assert len(paths) == len(origins), (
+                f"link {link.name!r}: {kind} mesh paths ({len(paths)}) and "
+                f"origins ({len(origins)}) count mismatch"
+            )
             for mesh_path, origin in zip(paths, origins):
                 resolved_path = _resolve_mesh_path(urdf_dir, mesh_path)
                 if resolved_path is None:
@@ -213,24 +321,20 @@ def inspect_meshes(model: KinematicModel) -> list[MeshReport]:
                 offset = (float(origin[0, 3]), float(origin[1, 3]), float(origin[2, 3]))
                 size_bytes = resolved_path.stat().st_size
 
-                try:
-                    mesh = _load_geometry_mm(resolved_path)
-                except ValueError as e:
+                if not load:
                     reports.append(MeshReport(
                         link=link.name, path=mesh_path, kind=kind, resolved=True,
-                        resolved_path=str(resolved_path), load_error=str(e),
+                        resolved_path=str(resolved_path), load_error=NOT_LOADED,
                         origin_offset_mm=offset, bytes=size_bytes,
                     ))
                     continue
 
-                lo, hi = mesh.bounds
+                triangles, bbox_mm, load_error = _load_geometry_cached(cache, resolved_path)
                 reports.append(MeshReport(
                     link=link.name, path=mesh_path, kind=kind, resolved=True,
                     resolved_path=str(resolved_path),
-                    triangles=len(mesh.faces),
-                    bbox_mm=(tuple(float(v) for v in lo), tuple(float(v) for v in hi)),
-                    origin_offset_mm=offset,
-                    bytes=size_bytes,
+                    triangles=triangles, bbox_mm=bbox_mm, load_error=load_error,
+                    origin_offset_mm=offset, bytes=size_bytes,
                 ))
 
     return reports

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from _armkit.meshes import inspect_meshes
+from _armkit.meshes import NOT_LOADED, inspect_meshes
 from _armkit.urdf import parse_urdf
 
 
@@ -200,3 +200,107 @@ def test_exists_but_malformed_reports_load_error_not_raise(mesh_workspace):
     assert report.load_error is not None
     assert report.triangles is None
     assert report.bbox_mm is None
+    assert report.loaded is False
+
+
+# ---------------------------------------------------------------------------
+# load=False: resolution-only, no trimesh -- and the `loaded` predicate.
+# ---------------------------------------------------------------------------
+
+def test_load_false_still_resolves_but_skips_loading(mesh_workspace):
+    urdf_path = _write_urdf(mesh_workspace, """
+      <link name="base">
+        <visual>
+          <origin xyz="0.01 0.02 0.03" rpy="0 0 0"/>
+          <geometry><mesh filename="package://some_pkg/meshes/cube.stl"/></geometry>
+        </visual>
+      </link>
+    """)
+    model = parse_urdf(urdf_path)
+    [report] = inspect_meshes(model, load=False)
+    assert report.resolved is True
+    assert report.resolved_path is not None
+    assert report.bytes and report.bytes > 0          # cheap: a stat, no trimesh
+    assert report.origin_offset_mm == (10.0, 20.0, 30.0)  # cheap: from the URDF, not the mesh
+    assert report.triangles is None
+    assert report.bbox_mm is None
+    assert report.load_error == NOT_LOADED
+    assert report.loaded is False
+
+
+def test_load_false_still_reports_unresolved_paths(mesh_workspace):
+    # load=False changes nothing about resolution itself.
+    urdf_path = _write_urdf(mesh_workspace, """
+      <link name="base">
+        <visual><geometry><mesh filename="package://nonexistent_pkg/meshes/cube.stl"/></geometry></visual>
+      </link>
+    """)
+    model = parse_urdf(urdf_path)
+    [report] = inspect_meshes(model, load=False)
+    assert report.resolved is False
+    assert report.load_error is None  # NOT_LOADED only applies once resolved
+
+
+def test_loaded_property_across_all_states(fixtures, mesh_workspace):
+    # unresolved (state 1)
+    unresolved_reports = inspect_meshes(parse_urdf(fixtures / "meshed.urdf"))
+    assert all(not r.resolved and r.loaded is False for r in unresolved_reports)
+
+    # resolved but broken (state 2a)
+    broken_urdf = _write_urdf(mesh_workspace, """
+      <link name="base">
+        <visual><geometry><mesh filename="meshes/garbage.stl"/></geometry></visual>
+      </link>
+    """)
+    [broken] = inspect_meshes(parse_urdf(broken_urdf))
+    assert broken.resolved and broken.load_error and broken.loaded is False
+
+    # resolved but not attempted (state 2b, load=False)
+    ok_urdf = _write_urdf(mesh_workspace, """
+      <link name="base">
+        <visual><geometry><mesh filename="package://some_pkg/meshes/cube.stl"/></geometry></visual>
+      </link>
+    """)
+    [not_attempted] = inspect_meshes(parse_urdf(ok_urdf), load=False)
+    assert not_attempted.resolved and not_attempted.load_error and not_attempted.loaded is False
+
+    # fully loaded (state 3)
+    [loaded] = inspect_meshes(parse_urdf(ok_urdf))
+    assert loaded.resolved and loaded.load_error is None and loaded.loaded is True
+    assert loaded.triangles is not None and loaded.bbox_mm is not None
+
+
+# ---------------------------------------------------------------------------
+# Caching: a mesh file referenced twice (visual + collision) is loaded once.
+# ---------------------------------------------------------------------------
+
+def test_shared_mesh_file_is_loaded_once_and_values_match(mesh_workspace, monkeypatch):
+    urdf_path = _write_urdf(mesh_workspace, """
+      <link name="base">
+        <visual><geometry><mesh filename="package://some_pkg/meshes/cube.stl"/></geometry></visual>
+        <collision><geometry><mesh filename="package://some_pkg/meshes/cube.stl"/></geometry></collision>
+      </link>
+    """)
+    model = parse_urdf(urdf_path)
+
+    import trimesh
+
+    calls: list = []
+    real_load = trimesh.load
+
+    def counting_load(*args, **kwargs):
+        calls.append(args[0] if args else kwargs.get("file_obj"))
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(trimesh, "load", counting_load)
+
+    reports = inspect_meshes(model)
+    assert len(reports) == 2
+    assert len(calls) == 1, "the second reference should reuse the cached load, not call trimesh again"
+
+    visual = next(r for r in reports if r.kind == "visual")
+    collision = next(r for r in reports if r.kind == "collision")
+    assert visual.loaded and collision.loaded
+    # Caching must not change what's reported, only how many times it's computed.
+    assert visual.triangles == collision.triangles == 12
+    assert visual.bbox_mm == collision.bbox_mm
