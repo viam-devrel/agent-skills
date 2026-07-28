@@ -46,7 +46,7 @@ confirm what's actually implemented.
 |---|---|---|---|---|
 | 0 | Triage | `docs/arm-brief.md` | On-ramp classified, DOF/joint order/units/limits/tool frame recorded, FK strategy and language both decided with justification | None -- manual |
 | 1 | Kinematics | `kinematics/<arm>.urdf` (or `.json` once SVA lands) | `armkit validate` passes | **`armkit validate` -- real, run it** |
-| 2 | Simulated model | `<ns>:<family>:<arm>-simulated` | Renders in the web app's 3D scene with its own meshes, joints slew, a motion plan executes -- no hardware. **Not achievable as written in Python** -- see note below | None -- manual verification in the web app |
+| 2 | Simulated model | `<ns>:<family>:<arm>-simulated` | Renders in the web app's 3D scene with its own meshes, joints slew, a motion plan executes -- no hardware. **Python: not as written, see note below** | None -- manual verification in the web app |
 | 3 | Real driver | `<ns>:<family>:<arm>` | Module reloads on real hardware, joints read back, one commanded move completes | None -- manual |
 | 4 | Operations & lifecycle | Cancellation, blocking, session-drop halt, reconnect, `Close` | **Advisory, non-blocking.** Cancel-other is Go-only -- see note below | Planned (`armkit_live.py ops-test`) -- not built. |
 | 5 | Hardware validation | -- | Pose error within tolerance across N sampled joint configs; limits enforced; units hold | Planned (`armkit_live.py fk-diff`) -- not built. Do this by hand: command known configs, compare `EndPosition` against expected poses. |
@@ -62,12 +62,15 @@ skip one that isn't.
 
 **Phase 2, in Python, cannot be met as written.** `Get3DModels` is in the
 proto and in Go's `Arm` interface, and is a pure virtual method in C++'s --
-but it is **absent from the Python SDK entirely**, so a Python simulated
-model has no way to serve visualization meshes. Don't let an agent grind
-against this gate in Python; pick one of the two ways out instead: degrade
-the Python gate to kinematics-and-collision-geometry only (the arm still
-appears in the 3D scene, just without its own visual meshes), or author the
-simulated model in Go alongside a Python real driver.
+but it is **absent from the Python SDK's `Arm` component and service
+dispatch** (the generated gRPC stubs exist under `viam/gen/component/arm/v1/`,
+but `viam/components/arm/service.py` has no handler for it), so a Python
+simulated model has no way to serve visualization meshes through the
+standard module machinery. Don't let an agent grind against this gate in
+Python; pick one of the two ways out instead: degrade the Python gate to
+kinematics-and-collision-geometry only (the arm still appears in the 3D
+scene, just without its own visual meshes), or author the simulated model
+in Go alongside a Python real driver.
 
 **Phase 4's cancel-other behavior is native only in Go**
 (`operation.SingleOperationManager`). Python's `run_with_operation` gives
