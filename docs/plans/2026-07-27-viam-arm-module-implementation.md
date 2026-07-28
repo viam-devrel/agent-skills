@@ -111,6 +111,32 @@ before touching it.
 `parse_urdf` without evaluating `m.dof` never runs them, and 52 rejects silently
 reclassify as accepts.
 
+> **Second corpus-scan trap: a broken command produces a plausible zero.** During A6
+> review, a reviewer reported "no mesh assets exist anywhere under `~/src`" — a false
+> negative that, if believed, would have discredited A6's measured triangle distribution
+> and restored an invented threshold. Root cause: `timeout` is **not installed on macOS**
+> (it ships as `gtimeout` via coreutils), so the command never launched; `2>/dev/null`
+> swallowed the `command not found`; and `wc -l` counted zero lines from a process that
+> never started.
+>
+> Nothing in that output distinguishes *"searched and found nothing"* from *"never
+> searched."* This matters for every counting operation in this plan — corpus buckets,
+> mesh statistics, drift checks — because they are all measurements where **absence is the
+> evidence**, and absence is exactly what a broken command also produces.
+>
+> Three rules, adopted:
+> 1. **Positive-control any null result.** Run the same search against something known to
+>    exist. A `find ~/src -name "*.urdf" | wc -l` alongside would have exposed the zero
+>    instantly.
+> 2. **Do not `2>/dev/null` a command you have not already seen succeed.** Suppressing
+>    stderr is noise reduction for a known-good command, not a first run.
+> 3. **Report absence with the command that produced it**, and hedge it. "This `find`
+>    returned nothing, not positively controlled" invites the check that "there are no
+>    meshes" forecloses.
+>
+> A measurement that contradicts established context should make you suspect the
+> measurement first.
+
 > **The corpus is not currently reproducible — fix this.** The 102/30/22/1 figures come
 > from ad-hoc scans over "every `.urdf` under `~/src` and `~/go/pkg/mod/go.viam.com`" on
 > one machine. No manifest or script was preserved, so the numbers above cannot be
