@@ -24,9 +24,34 @@ A `continuous` joint becomes a `revolute` joint with infinite limits without com
 - Produce a checkable artifact at every phase, so an agent can detect its own failures.
 - Document what the SDKs are missing, with source-verified evidence, as a byproduct.
 
+## Scope: one arm, optionally with a tool
+
+**armkit supports building a Viam arm module — a single serial arm chain, optionally with
+a tool or gripper attached. It is not a general URDF validator.**
+
+Out of scope: multi-arm robots, mobile bases, humanoids, and any model that is not one
+arm. A dual-arm URDF like `mybuddy.urdf` is not expected to work, and armkit should not
+grow features to accommodate it.
+
+This distinction is not cosmetic — it changes what "correct" means:
+
+- **RDK parity governs kinematic fidelity** (poses, mimic composition, orientation
+  conventions, accept/reject verdicts on the math). armkit should match RDK there, and
+  the Go probe is how that is checked.
+- **RDK parity does NOT govern scope.** RDK models whole robots; a Viam arm module
+  describes one arm. Where the two disagree, the arm module wins.
+
+The concrete case, measured on a mycobot 320 with its gripper attached: RDK's BFS counts
+every actuated joint in the tree, so armkit reported `dof = 7` where 6 joints are on the
+arm chain and 1 belongs to the gripper. Shipping that kinematics file produces a module
+declaring a 7-DoF arm whose `JointPositions` returns 6 values — an arity mismatch in
+`GetKinematics` and in motion planning. The gripper is a separate Viam component and does
+not belong in the arm's kinematics. Hence the `joints-off-chain` error.
+
 ## Non-goals
 
 - Deriving kinematics from CAD/STEP with no kinematic description. Out of scope.
+- Supporting robots that are not a single arm. See Scope above.
 - A module code generator. Templates rot across three SDKs and hide understanding the
   developer needs when FK is subtly wrong.
 - Fixing the SDK gaps. This spec documents them and prototypes fixes; landing them

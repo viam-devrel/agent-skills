@@ -1222,6 +1222,25 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 | `structure` | error | `chain()` raised — branching, cycle, multiple roots, or disconnection |
 | `parse` | error | the parser raised `ValueError` — surface its message verbatim |
 | `input-out-of-bounds` | error | a `--at` value falls outside its joint's declared limits |
+| `joints-off-chain` | error | actuated joints exist that are not on the path to the tip |
+
+**`joints-off-chain` enforces the scope: one arm, not a robot.** RDK's BFS counts every
+actuated joint in the tree toward DoF — correct for RDK, wrong for a Viam arm module.
+Measured on a mycobot 320 with its gripper attached and `--tip gripper_base`:
+
+```
+dof (all actuated, BFS):   7
+actuated ON the chain:     6   joint2_to_joint1 ... joint6output_to_joint6
+actuated OFF the chain:    1   gripper_controller
+```
+
+The arm is 6-DoF. Shipping that file yields a module declaring a 7-DoF arm whose
+`JointPositions` returns 6 values — an arity mismatch in `GetKinematics` and in motion
+planning. The gripper is a separate Viam component.
+
+This is the one place armkit deliberately diverges from RDK on *scope* rather than on
+kinematic fidelity. Record it in `test_parity.py` alongside the other divergences, in the
+"armkit is right" group.
 
 **`input-out-of-bounds` closes a divergence found during A4 review.** RDK's `Transform()`
 validates inputs against joint limits and errors; armkit's `fk.py` does no limit checking
@@ -1600,12 +1619,11 @@ Depends on A and B.
 **Files:**
 - Create: `skills/viam-arm-module/SKILL.md`
 
-**Document the multi-arm case** — the one place armkit's output is correct and still
-surprising. `mybuddy.urdf` (a dual-arm robot) reports `13 actuated joints, base base ->
-tip link1`. That is right: a declared tip legitimately counts branch joints toward DoF, as
-established in A3b. But a reader can easily misread 13 DoF at a torso link as a bug. Say
-in `SKILL.md` that when a model contains multiple *arms* rather than an arm plus a tool,
-validate each arm's chain separately rather than declaring a common tip.
+**State the scope plainly.** armkit supports building a Viam arm module — **one serial arm
+chain, optionally with a tool attached**. It is not a general URDF validator. Multi-arm
+robots, mobile bases, and humanoids are out of scope and should not be accommodated. A
+dual-arm file like `mybuddy.urdf` is simply not a supported input; do not document how to
+coax it through.
 
 **State the platform requirements**, including that Windows ARM64 is unsupported and fails
 during dependency resolution *before Python runs*, so armkit cannot catch or explain it.
