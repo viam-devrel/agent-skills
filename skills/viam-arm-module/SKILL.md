@@ -46,7 +46,7 @@ confirm what's actually implemented.
 |---|---|---|---|---|
 | 0 | Triage | `docs/arm-brief.md` | On-ramp classified, DOF/joint order/units/limits/tool frame recorded, FK strategy, language, and kinematics-file format all decided with justification | None -- manual |
 | 1 | Kinematics | `kinematics/<arm>.urdf` (or `.json` once SVA lands) | `armkit validate` passes | **`armkit validate` -- real, run it** |
-| 2 | Simulated model | `<ns>:<family>:<arm>-simulated` | Renders in the web app's 3D scene with its own meshes, joints slew, a motion plan executes -- no hardware. **Python: not as written, see note below** | None -- manual verification in the web app |
+| 2 | Simulated model | `<ns>:<family>:<arm>-simulated` | Renders in the web app's 3D scene with its own meshes, joints slew, a motion plan executes -- no hardware. **Python: collision meshes yes, visual `.glb` meshes no, see note below** | None -- manual verification in the web app |
 | 3 | Real driver | `<ns>:<family>:<arm>` | Module reloads on real hardware, joints read back, one commanded move completes | None -- manual |
 | 4 | Operations & lifecycle | Cancellation, blocking, session-drop halt, reconnect, `Close` | **Advisory, non-blocking.** Cancel-other is Go-only -- see note below | Planned (`armkit_live.py ops-test`) -- not built. |
 | 5 | Hardware validation | -- | Pose error within tolerance across N sampled joint configs; limits enforced; units hold | Planned (`armkit_live.py fk-diff`) -- not built. Do this by hand: command known configs, compare `EndPosition` against expected poses. |
@@ -60,17 +60,24 @@ skip one that isn't.
 
 ### Two gates are not a uniform bar across languages
 
-**Phase 2, in Python, cannot be met as written.** `Get3DModels` is in the
-proto and in Go's `Arm` interface, and is a pure virtual method in C++'s --
-but it is **absent from the Python SDK's `Arm` component and service
-dispatch** (the generated gRPC stubs exist under `viam/gen/component/arm/v1/`,
-but `viam/components/arm/service.py` has no handler for it), so a Python
-simulated model has no way to serve visualization meshes through the
-standard module machinery. Don't let an agent grind against this gate in
-Python; pick one of the two ways out instead: degrade the Python gate to
-kinematics-and-collision-geometry only (the arm still appears in the 3D
-scene, just without its own visual meshes), or author the simulated model
-in Go alongside a Python real driver.
+**Phase 2's mesh gate is two channels in Python -- one works, one doesn't.**
+`GetKinematics`'s `meshes_by_urdf_filepath` -- a `Tuple[KinematicsFileFormat,
+bytes, Mapping[str, Mesh]]` -- **is** supported by the Python SDK, and RDK's
+`UnmarshalModelXML` (`referenceframe/model.go:38`) consumes it for motion
+planning's collision geometry: a Python simulated model can ship real
+`.stl`/`.dae` meshes today and RDK will use them. `Get3DModels` is the gap:
+it's in the proto and Go's `Arm` interface, and a pure virtual method in
+C++'s, but **absent from the Python SDK's `Arm` service dispatch**
+(`viam/components/arm/service.py` has no handler, though the gRPC stubs
+exist under `viam/gen/component/arm/v1/`), so Python can't ship the `.glb`
+render assets (`model/gltf-binary`) the web app's 3D scene shows -- RDK
+ships these per-link (`base_link`, `ee_link`, ...) under
+`components/arm/fake/3d_models/`. Neither the mesh-map's key format nor
+this content-type convention is documented Python-facing; both were found
+only by reading `model.go` and the fake-arm source. Don't grind against
+`Get3DModels`; degrade the gate to kinematics-and-collision-geometry only
+(correct collision volumes in the 3D scene, no visual mesh), or author the
+simulated model in Go alongside a Python real driver.
 
 **Phase 4's cancel-other behavior is native only in Go**
 (`operation.SingleOperationManager`). Python's `run_with_operation` gives
@@ -225,8 +232,12 @@ resolver error on Windows ARM64, that's the reason, not a bug in the script.
   driver code against an unvalidated model.
 - **Simulated model before hardware.** Phase 2 blocks Phase 3.
 - **Every arm module ships both a real and a `-simulated` model** (naming:
-  `viam:dobot:cr10a` / `viam:dobot:cr10a-simulated`), declared together in
-  `meta.json`.
+  `viam:dobot:cr10a` / `viam:dobot:cr10a-simulated`). `meta.json` can't
+  declare both before both exist: it gains the simulated model at Phase 2
+  and the real model at Phase 3, so "declared together" is the state Phase 6
+  ships, not a Phase 2 gate. (The reference Go module this skill points at,
+  `viam-ufactory-xarm`, declares no simulated model at all -- that's the gap
+  this opinion exists to close, not evidence the opinion is optional.)
 - **URDF as-is when the vendor ships one.** Do not convert to SVA unless
   forced -- URDF is the only practical way to carry mesh collision geometry.
 - **Cancellation is not optional**, even though its test (`ops-test`, Phase 4)
