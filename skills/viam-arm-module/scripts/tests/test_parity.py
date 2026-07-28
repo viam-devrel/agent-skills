@@ -140,6 +140,26 @@ def test_mimic_of_fixed_matches_rdk(fixtures):
     ) in msg
 
 
+# ---------------------------------------------------------------------------
+# Deliberate divergences from RDK, recorded so they read as decisions rather
+# than drift. They fall into two piles a future reader must tell apart
+# before "fixing" any of them:
+#
+#   "armkit is right, RDK is wrong" -- missing meshes (below), missing
+#   <origin> (below), and joints-off-chain (test_joints_off_chain_is_a_
+#   deliberate_scope_divergence). armkit's behavior here is the INTENDED,
+#   permanent state. Closing one of these would mean regressing armkit to
+#   match a bug (missing-mesh, missing-origin) or a scope RDK was never
+#   asked to respect (joints-off-chain, RDK models whole robots, not one
+#   Viam arm module) -- don't.
+#
+#   "armkit is wrong, intends to close" -- FK not enforcing joint limits
+#   (test_fk_does_not_enforce_joint_limits_yet). This one is an
+#   acknowledged OMISSION armkit means to fix; its test exists to describe
+#   the gap accurately until that happens, not to bless it.
+# ---------------------------------------------------------------------------
+
+
 def test_mesh_and_origin_divergences_are_deliberate(fixtures):
     # TWO deliberate, RECORDED divergences from RDK, not drift -- both
     # share the same consequence, stated explicitly: an armkit PASS does
@@ -226,7 +246,7 @@ def test_joints_off_chain_is_a_deliberate_scope_divergence(fixtures):
 
 
 def test_fk_does_not_enforce_joint_limits_yet(fixtures):
-    # A THIRD divergence, recorded like the two above but of a different
+    # A FOURTH divergence, recorded like the three above but of a different
     # character: RDK's Transform() validates each input against the
     # joint's <limit> before computing a pose; _armkit/fk.py does not --
     # forward_kinematics() will happily compute a pose for an
