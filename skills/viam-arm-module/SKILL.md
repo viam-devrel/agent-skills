@@ -110,9 +110,9 @@ new codes are added over time and are additive, not breaking.
 typically surfaces `joints-off-chain`: a Viam arm module's kinematics must
 describe only the arm, so any actuated joint that isn't on the path to the
 declared tip is an error, not a warning -- it usually belongs to the gripper
-or a second tool, not the arm. Across the corpus, 18 of 29 branching files
-have exactly one off-chain joint -- usually one `<joint>` element to delete
-from the URDF.
+or a second tool, not the arm. In most vendor URDFs the off-chain joints are
+a single `<joint>` element -- the gripper's actuator -- so the fix is usually
+one small edit rather than restructuring the file.
 
 **An armkit PASS does not guarantee RDK will load the file.** Two known,
 deliberate divergences: RDK hard-fails when a mesh file it references can't
