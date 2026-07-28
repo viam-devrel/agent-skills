@@ -577,12 +577,14 @@ def test_validate_inverted_limits_reported(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_validate_warns_about_mesh_references_on_pass(fixtures):
-    # meshed.urdf has one visual mesh (base.dae) and one collision mesh
-    # (link1.stl) and is otherwise a valid, passing 1-DOF model.
+    # meshed.urdf references three mesh files -- base's visual (base.dae),
+    # and link1's visual+collision pair (link1.dae, link1.stl), the latter
+    # added by A6 so a visual/collision pairing bug has a fixture to catch
+    # it -- and is otherwise a valid, passing 1-DOF model.
     r = run("validate", str(fixtures / "meshed.urdf"))
     assert r.returncode == 0, r.stdout
     assert "mesh-references" in r.stdout
-    assert "2 mesh" in r.stdout
+    assert "3 mesh" in r.stdout
     assert "PASS" in r.stdout
 
 

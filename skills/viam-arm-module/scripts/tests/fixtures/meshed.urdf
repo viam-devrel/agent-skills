@@ -1,12 +1,22 @@
 <robot name="meshed">
   <link name="base">
     <visual>
+      <origin xyz="0.01 0.02 0.03" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://some_pkg/meshes/base.dae"/>
       </geometry>
     </visual>
   </link>
   <link name="link1">
+    <!-- Carries BOTH a visual and a collision mesh reference (neither
+         resolvable, same as base's), so a visual/collision pairing bug
+         in mesh inspection would surface as a wrong kind, path, or
+         origin on this link, not go uncaught. -->
+    <visual>
+      <geometry>
+        <mesh filename="meshes/link1.dae"/>
+      </geometry>
+    </visual>
     <collision>
       <geometry>
         <mesh filename="meshes/link1.stl"/>
