@@ -32,9 +32,30 @@ gate before the long tail:
 | 1 | A0 (probe), **A4** (FK), **A7** (validate CLI) | Phase 1's gate is real and runnable |
 | 2 | **C1** (SKILL.md), **C2** (registration) | A working, installable skill |
 | 3 | A6, A8, A9 | Mesh inspection, `meshes`/`simplify`/`convert` |
-| 4 | A5a/A5b/A5c (SVA, split) | Second parser |
-| 5 | A10, A11, A12 | Cross-check and live-machine checks |
-| 6 | B1–B8 | References, written last |
+| 4 | **B4 `driver-reference.md`** (pulled forward) | How a validated file becomes a module's `GetKinematics` |
+| 5 | A5a/A5b/A5c (SVA, split) | Second parser |
+| 6 | A10, A11, A12 | Cross-check and live-machine checks |
+| 7 | B1–B3, B5–B8 | Remaining references |
+
+**Reordered after the slice-acceptance review, on evidence.** All 84 real vendor URDFs on
+this machine were run through the developer flow: **52 (61.9%) PASS as-is**, 29 (34.5%)
+need the documented URDF edit, 2 have no joints, 1 is parse-rejected.
+
+- **Meshes stay first.** Mesh resolution is the largest remaining correctness gap between
+  an armkit PASS and RDK actually loading the file — confirmed on `cr5_robot.urdf` and
+  both mycobot gripper URDFs. It is also the only specced-but-unimplemented findings-table
+  entry, and `urdf.py` already collects the reference lists A6 needs, so A6 consumes
+  existing data rather than building a subsystem.
+- **`driver-reference.md` moves ahead of SVA.** A developer finishes Phase 1 with a
+  validated URDF and then falls off a cliff: nothing says how that file becomes the
+  module's `GetKinematics` response. It is the only place a reader needs something no
+  skill covers, and Phases 2–3 — where the actual work of building an arm module happens —
+  have neither tooling nor reference material.
+- **SVA drops back.** The enforced opinion is already "URDF as-is when the vendor ships
+  one," and 62% of vendor arms ship URDF that passes. SVA serves on-ramp 3 (vendor
+  protocol only, hand-authored kinematics), the rarest of the three.
+
+Sequenced by *where a developer gets stuck*, which is what the acceptance data measures.
 
 **Why B moves last:** the references describe behavior. Written now they would describe
 *intended* behavior; written after the toolkit they describe *verified* behavior.
