@@ -21,9 +21,10 @@ by `armkit`, an offline kinematics validator.
 
 **One serial arm chain, optionally with a tool or gripper attached.** Not a
 general URDF validator. Multi-arm robots, mobile bases, and humanoids are out
-of scope -- a dual-arm URDF (e.g. `mybuddy.urdf`) is not a supported input, and
-nothing here should be stretched to accommodate it. If the file describes
-more than one arm, stop and say so rather than trying to make it fit.
+of scope -- a dual-arm robot such as the Elephant Robotics myBuddy is not a
+supported input, and nothing here should be stretched to accommodate it. If
+the file describes more than one arm, stop and say so rather than trying to
+make it fit.
 
 RDK parity governs kinematic *fidelity* (poses, mimic composition, orientation
 conventions) -- `armkit` matches RDK there. RDK parity does **not** govern
@@ -47,7 +48,7 @@ confirm what's actually implemented.
 | 1 | Kinematics | `kinematics/<arm>.urdf` (or `.json` once SVA lands) | `armkit validate` passes | **`armkit validate` -- real, run it** |
 | 2 | Simulated model | `<ns>:<family>:<arm>-simulated` | Renders in the web app's 3D scene with its own meshes, joints slew, a motion plan executes -- no hardware. **Not achievable as written in Python** -- see note below | None -- manual verification in the web app |
 | 3 | Real driver | `<ns>:<family>:<arm>` | Module reloads on real hardware, joints read back, one commanded move completes | None -- manual |
-| 4 | Operations & lifecycle | Cancellation, blocking, session-drop halt, reconnect, `Close` | **Advisory, non-blocking:** a second command cancels the first; dropping the client session halts motion. **Cancel-other is Go-only** -- see note below | Planned (`armkit_live.py ops-test`) -- not built. Module development can complete without this gate passing. |
+| 4 | Operations & lifecycle | Cancellation, blocking, session-drop halt, reconnect, `Close` | **Advisory, non-blocking.** Cancel-other is Go-only -- see note below | Planned (`armkit_live.py ops-test`) -- not built. |
 | 5 | Hardware validation | -- | Pose error within tolerance across N sampled joint configs; limits enforced; units hold | Planned (`armkit_live.py fk-diff`) -- not built. Do this by hand: command known configs, compare `EndPosition` against expected poses. |
 | 6 | Package & publish | Uploaded module | Clean-machine reload succeeds | None -- use `viam module upload` (see `viam-modules-fleet`) |
 
@@ -100,6 +101,17 @@ in-process FK today.
 Record DOF, joint order, units, limits, and tool frame in the brief. Gate:
 brief written, both decisions recorded with justification.
 
+### From a validated file to a module's kinematics
+
+Phase 1 produces a file; Phase 2's driver code has to serve it.
+`GetKinematics` returns the same file `armkit validate` just checked --
+embedded in (or shipped alongside) the module binary, read once at startup.
+The mechanics of embedding a kinematics file and its meshes in the binary
+per language, and per-language `GetKinematics`/`Get3DModels` signatures,
+belong in `references/driver-reference.md` -- not yet written (Workstream B).
+Until it exists, read the file straight from disk relative to the module's
+working directory and treat packaging as a Phase 6 concern.
+
 ## Using armkit
 
 ```
@@ -127,11 +139,27 @@ new codes are added over time and are additive, not breaking.
 `structure` error ("need exactly one end effector, have [...]") and suggests
 `--tip <link>` at the first fork point. Re-running with that `--tip` then
 typically surfaces `joints-off-chain`: a Viam arm module's kinematics must
-describe only the arm, so any actuated joint that isn't on the path to the
-declared tip is an error, not a warning -- it usually belongs to the gripper
-or a second tool, not the arm. In most vendor URDFs the off-chain joints are
-a single `<joint>` element -- the gripper's actuator -- so the fix is usually
-one small edit rather than restructuring the file.
+describe only the arm, so any actuated joint not on the path to the declared
+tip is an error.
+
+**Fixing it means removing the gripper subtree, not just the joints armkit
+names.** armkit lists only *actuated* off-chain joints; a gripper's other
+joints are usually `fixed` or `mimic`, so they aren't listed but still must
+go. Deleting only the named joint will break the file -- on a real mycobot
+gripper URDF, five other joints `<mimic>` the one armkit names, and removing
+it alone turns a `joints-off-chain` error into a `parse` error.
+
+Work from the tip instead of from the list:
+
+1. Copy the vendor file to `kinematics/<arm>.urdf` -- edit the copy, never
+   the vendor original.
+2. Delete every `<joint>` whose `<parent link>` is the declared tip or any
+   link downstream of it, plus the `<link>` elements they introduce.
+3. Re-run `validate` with no `--tip`. The trimmed arm should now have a
+   single leaf and auto-resolve.
+
+On that mycobot file the edit is 6 joints and 6 links, and the result passes
+with `6 actuated joints, base base -> tip gripper_base`.
 
 **An armkit PASS does not guarantee RDK will load the file.** Two known,
 deliberate divergences: RDK hard-fails when a mesh file it references can't
