@@ -34,7 +34,7 @@ def test_ur20_yields_empty_report(fixtures):
     assert inspect_meshes(model) == []
 
 
-def test_meshed_urdf_yields_two_unresolved(fixtures):
+def test_meshed_urdf_yields_three_unresolved(fixtures):
     # meshed.urdf's mesh references are deliberately unresolvable (none of
     # the files exist on disk) -- the whole point of that fixture. base has
     # one visual mesh; link1 has one visual and one collision mesh (the
