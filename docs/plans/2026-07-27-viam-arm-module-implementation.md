@@ -1273,9 +1273,41 @@ same message RDK gives — `only files with .json and .urdf file extensions are 
 > | 2 636 | 3 542 | 7 916 | **17 601** | 33 292 | 58 122 | 127 177 | 448 644 |
 >
 > 5 000 sits below the 10th percentile — nearly every real vendor mesh would trip it, so
-> the warning would fire on almost every file and mean nothing. Pick a threshold in the
-> **p90–p95 band (~60 000–130 000)** to flag genuine outliers, and state in the finding
-> that the number is empirical rather than a spec limit.
+> the warning would fire on almost every file and mean nothing.
+>
+> **Decided during A6 review: threshold 50 000, collision meshes only.** Just under p90,
+> so it flags roughly the worst decile and stays quiet on a typical arm.
+>
+> **Collision-only is not a refinement, it is the whole signal.** Measured across four
+> vendor arms, the collision and visual triangle distributions are *identical* (n=15 each,
+> median 20 830, p90 38 110, max 233 248) because **vendors ship the same mesh file for
+> both**. A 233k-triangle visual mesh is fine — it renders once. The same file as
+> collision geometry is checked every planning step. Scoping to `kind == "collision"` also
+> halves finding volume by not double-reporting one file.
+>
+> Say what good looks like, because the corpus median is itself bad practice — collision
+> geometry wants hundreds of triangles, not tens of thousands:
+>
+> ```
+> [WARN] heavy-mesh: collision mesh 'meshes/link1.dae' on link 'link1' has 233,248
+>        triangles (typical vendor collision meshes are ~18,000; motion planning wants
+>        far fewer). Consider a convex hull or a primitive -- see `armkit simplify`.
+> ```
+
+> **`validate` must use the cheap path. Measured during A6 review:**
+>
+> | operation | time |
+> |---|---|
+> | `parse_urdf` | 2.3 ms |
+> | resolution only (14 refs) | **0.25 ms** |
+> | `inspect_meshes` full load (14 refs) | **1505.7 ms** |
+>
+> A 6 000× gap. `unresolved-mesh` needs **only** resolution, and it is the finding that
+> closes the largest PASS-vs-RDK-loads gap. `inspect_meshes` therefore takes
+> `load: bool = True`; `validate` calls it with `load=False` so every unresolved mesh is
+> caught for free, and `armkit meshes` / `heavy-mesh` opt into loading. Without this, A8
+> must choose between a 600× slower hot path and leaving the most common RDK-rejection
+> reason unchecked.
 >
 > Other A6 corpus data worth having in A8: of 1 024 mesh references, **89% resolved and
 > loaded, 3% resolved but failed to load, 8% did not resolve**. All 31 load failures trace
