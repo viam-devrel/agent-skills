@@ -61,23 +61,18 @@ skip one that isn't.
 ### Two gates are not a uniform bar across languages
 
 **Phase 2's mesh gate is two channels in Python -- one works, one doesn't.**
-`GetKinematics`'s `meshes_by_urdf_filepath` -- a `Tuple[KinematicsFileFormat,
-bytes, Mapping[str, Mesh]]` -- **is** supported by the Python SDK, and RDK's
-`UnmarshalModelXML` (`referenceframe/model.go:38`) consumes it for motion
-planning's collision geometry: a Python simulated model can ship real
-`.stl`/`.dae` meshes today and RDK will use them. `Get3DModels` is the gap:
-it's in the proto and Go's `Arm` interface, and a pure virtual method in
-C++'s, but **absent from the Python SDK's `Arm` service dispatch**
-(`viam/components/arm/service.py` has no handler, though the gRPC stubs
-exist under `viam/gen/component/arm/v1/`), so Python can't ship the `.glb`
-render assets (`model/gltf-binary`) the web app's 3D scene shows -- RDK
-ships these per-link (`base_link`, `ee_link`, ...) under
-`components/arm/fake/3d_models/`. Neither the mesh-map's key format nor
-this content-type convention is documented Python-facing; both were found
-only by reading `model.go` and the fake-arm source. Don't grind against
-`Get3DModels`; degrade the gate to kinematics-and-collision-geometry only
-(correct collision volumes in the 3D scene, no visual mesh), or author the
-simulated model in Go alongside a Python real driver.
+`GetKinematics`'s `meshes_by_urdf_filepath` **is** supported by the Python
+SDK, and RDK's `UnmarshalModelXML` consumes it for motion planning's
+collision geometry -- a Python simulated model can ship real `.stl`/`.dae`
+meshes today. `Get3DModels` is the gap: absent from the Python SDK's `Arm`
+service dispatch entirely, so Python can't ship the `.glb` render assets the
+web app's 3D scene shows. Don't grind against `Get3DModels`; degrade the
+gate to kinematics-and-collision-geometry only (correct collision volumes in
+the 3D scene, no visual mesh), or author the simulated model in Go alongside
+a Python real driver. `references/driver-reference.md` §4-§5 has the
+mesh-map key/content-type convention, a verified working pattern, and the
+trap in the SDK's own example code that looks like it implements
+`Get3DModels` but is never called.
 
 **Phase 4's cancel-other behavior is native only in Go**
 (`operation.SingleOperationManager`). Python's `run_with_operation` gives
@@ -135,11 +130,10 @@ justification.
 Phase 1 produces a file; Phase 2's driver code has to serve it.
 `GetKinematics` returns the same file `armkit validate` just checked --
 embedded in (or shipped alongside) the module binary, read once at startup.
-The mechanics of embedding a kinematics file and its meshes in the binary
-per language, and per-language `GetKinematics`/`Get3DModels` signatures,
-belong in `references/driver-reference.md` -- not yet written (Workstream B).
-Until it exists, read the file straight from disk relative to the module's
-working directory and treat packaging as a Phase 6 concern.
+`references/driver-reference.md` §4 has the verified Python
+`get_kinematics()`/mesh-map convention; per-language packaging mechanics
+beyond that remain a Phase 6 concern -- until then, read the file straight
+from disk relative to the module's working directory.
 
 **Units change at each of these boundaries, and converting between them is
 the module author's job -- nothing in the SDK does it for you:**
@@ -154,6 +148,15 @@ Go's `referenceframe.Input` is radians internally, but a Python or C++
 driver talks to the Viam API directly, in millimetres and degrees -- get a
 conversion wrong here and the arm moves to a wildly wrong position with no
 error raised.
+
+**Converting orientation is a representation change, not a units problem.**
+Vendor SDKs typically report roll/pitch/yaw; Viam's `Pose` uses an
+orientation vector -- `viam.spatialmath` (ships with the Python SDK,
+FFI-backed) converts between them correctly via `EulerAngles`/`Quaternion`.
+Use `Quaternion`'s `w`/`i`/`j`/`k` accessors, never `RotationMatrix.elements`:
+its buffer layout changed between viam-sdk 0.79.2 and 0.80.0 and will
+silently transpose the rotation on whichever version you didn't test against
+(`references/driver-reference.md` §7).
 
 ## Using armkit
 
@@ -214,6 +217,25 @@ RDK. When `armkit` PASSes cleanly (no `mesh-references`/`missing-origin`
 findings), its JSON output's `rdk_parity.guaranteed` field reflects this
 directly; otherwise treat a PASS as necessary, not sufficient.
 
+## Phase 3: behaviour over structure
+
+**When porting from a reference implementation in another language, take its
+behaviour, not its structure**: controller semantics, error/fault codes,
+what `Stop` must do to the hardware, and speed/acceleration bounds carry
+across languages; registration mechanics, the concurrency model, resource
+lifecycle, and how FK gets computed do not.
+`references/driver-reference.md` §1 has the worked case -- porting the Go
+xArm module's structure into Python would have added an unneeded
+dependency, an unexecutable FK strategy, and reinvented trajectory
+smoothing.
+
+**The arm method set is not uniform across languages, either.** Python's
+`Arm` ABC lacks `move_through_joint_positions` entirely -- no ABC method, no
+RPC dispatch -- though it's present on both Go's and C++'s `Arm`; combined
+with `get_3d_models`'s absence (Phase 2, above), don't assume method parity
+when porting. `references/driver-reference.md` §2 has the full per-language
+method table.
+
 ## Requirements
 
 Python 3.11+, `uv`. `armkit.py` is a single PEP 723 file -- `uv run` fetches
@@ -248,6 +270,11 @@ resolver error on Windows ARM64, that's the reason, not a bug in the script.
 
 Point at these rather than duplicating their content:
 
+- **`references/driver-reference.md`** -- this skill's own depth: structure
+  vs. behaviour when porting, the per-language arm method-set table, FK/IK
+  rung selection in practice, the two mesh channels, blocking-vendor-SDK
+  cancellation, and `viam.spatialmath`, all written from a real Python xArm
+  port
 - **`viam-go-motion-vision`** -- motion planning, frame systems, `PlanRequest`,
   motion-service delegation for FK/IK once the arm exists
 - **`viam-cpp`** -- C++ SDK mechanics generally (module registration, CMake,
