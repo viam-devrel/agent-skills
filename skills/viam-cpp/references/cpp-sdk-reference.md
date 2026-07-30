@@ -55,12 +55,21 @@ Resource (name, api(), logger_)
 
 | Mixin | Header | Purpose |
 |-------|--------|---------|
-| `Reconfigurable` | `resource/reconfigurable.hpp` | `reconfigure(deps, cfg)` -- called on config changes |
-| `Stoppable` | `resource/stoppable.hpp` | `stop(extra)` -- called on shutdown |
+| `Stoppable` | `resource/stoppable.hpp` | `stop(extra)` -- called on shutdown, and also by the SDK during reconfiguration (see below) |
 
-Modules **should** implement `Reconfigurable` for live config updates without
-restart. `Stoppable` is required for resources that hold hardware state (arms,
-motors) and recommended for streaming resources (cameras).
+**As of v0.39.0** (re-verified against `src/viam/sdk/` on 2026-07-30), there
+is no `Reconfigurable` mixin -- it was deleted in commit `57140776` ("remove
+reconfigurable (#630)", 2026-05-12). `Resource`'s only virtuals are the
+destructor, `api()`, `get_resource_name()`, and `name()`
+(`resource/resource.hpp:23-38`); there is no virtual `reconfigure` anywhere in
+the SDK. Reconfiguration is destroy-and-reconstruct instead: the
+`ReconfigureResource` RPC looks up the existing resource, calls `stop()` on it
+if it's `Stoppable`, then rebuilds it from scratch by calling
+`ModelRegistration::construct_resource` -- i.e. your constructor
+(`module/service.cpp:101-150`). `Stoppable` is required for resources that
+hold hardware state (arms, motors) and recommended for streaming resources
+(cameras) -- and its `stop()` must tolerate being called mid-reconfigure, not
+just on shutdown.
 
 ---
 
@@ -183,6 +192,10 @@ public:
 - **validator**: Called before construction. Throw `std::invalid_argument` on
   bad config. Return a `vector<string>` of implicit dependency names (usually
   empty `{}`).
+- **This constructor is also the reconfiguration entry point** (v0.39.0+):
+  `ReconfigureResource` calls it again with a fresh `Dependencies`/
+  `ResourceConfig` instead of mutating the running object
+  (`module/service.cpp:144-146`). There is no separate `reconfigure` method.
 
 ---
 
@@ -436,7 +449,12 @@ Key patterns from production modules:
 - **UR arm**: Uses `std::shared_mutex` with read locks for queries and
   write locks for config/state changes.
 - **TFLite**: Uses `std::shared_mutex` (`state_rwmutex_`) so inference calls
-  can run concurrently while reconfigure takes exclusive access.
+  can run concurrently while a write lock (now taken in `stop()`, not a
+  `reconfigure()` override -- see `driver-patterns-reference.md` section 5)
+  gets exclusive access. Note: the SDK's own tflite example
+  (`examples/modules/tflite/main.cpp:94-95`) still has a `reconfigure(...)
+  final` method left over from before `Reconfigurable` was removed, which no
+  longer compiles -- don't copy its lifecycle, only the locking idea.
 
 ---
 
@@ -545,8 +563,7 @@ response["name"] = "test";
 #include <viam/sdk/registry/registry.hpp>      // Registry, ModelRegistration
 #include <viam/sdk/config/resource.hpp>        // ResourceConfig
 #include <viam/sdk/resource/resource.hpp>      // Resource, Dependencies
-#include <viam/sdk/resource/reconfigurable.hpp>// Reconfigurable
-#include <viam/sdk/resource/stoppable.hpp>     // Stoppable
+#include <viam/sdk/resource/stoppable.hpp>     // Stoppable (no reconfigurable.hpp -- removed in v0.39.0)
 #include <viam/sdk/log/logging.hpp>            // VIAM_SDK_LOG, VIAM_RESOURCE_LOG
 
 // Components:

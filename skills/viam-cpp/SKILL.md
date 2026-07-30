@@ -37,9 +37,17 @@ custom hardware components.
 **Read the relevant reference file(s) before answering any non-trivial question.**
 
 **Version awareness:** These references were built from viam-cpp-sdk v0.25.1 and
-production module source circa April 2026. The SDK evolves -- check the user's
+production module source circa April 2026 -- treat any specific API surface as
+a claim to re-check, not a fact. The SDK evolves -- check the user's
 `conanfile.py` or `CMakeLists.txt` for their SDK version. If they have a local
 SDK checkout, prefer grepping it over trusting this reference blindly.
+**Pin version claims inline, next to the claim** -- a single disclaimer here
+does not stop a stale specific from being acted on three sections down. Case
+in point: the reconfiguration guidance below was re-verified against
+viam-cpp-sdk **v0.39.0** source (`~/src/viam-cpp-sdk`) on 2026-07-30, and the
+old `Reconfigurable`-based guidance it replaced was wrong -- that interface was
+deleted in commit `57140776` ("remove reconfigurable (#630)", 2026-05-12) and
+no longer exists anywhere in `src/viam/sdk/`.
 
 **Never** fabricate API signatures, CMake target names, or header paths. If
 uncertain, say so and suggest checking the SDK headers or
@@ -82,15 +90,28 @@ faster to develop.
 integers are stored as `double`. Use `attrs[key].is_a<double>()` not
 `is_a<int>()`.
 
-**Reconfiguration:** Implement `Reconfigurable` for live config updates.
-Two patterns:
-- Full state replacement (create new state, swap under write lock)
-- In-place reconfiguration (stop, reconfigure, restart hardware)
+**Reconfiguration (v0.39.0+, verified against `src/viam/sdk/` 2026-07-30):**
+There is no `Reconfigurable` interface and no virtual `reconfigure` to
+override -- it was deleted in commit `57140776` (2026-05-12). Reconfiguration
+is destroy-and-reconstruct: the `ReconfigureResource` RPC looks up the
+existing resource, calls `stop()` on it if it's `Stoppable`
+(`module/service.cpp:131-133`), then discards it and rebuilds it from scratch
+via `ModelRegistration::construct_resource` -- your constructor
+`(Dependencies, ResourceConfig)` (`registry/registry.hpp:73-82`,
+`module/service.cpp:144-146`). Concretely:
+- **All config handling belongs in the constructor.** There's nothing else to
+  put it in.
+- **Implement `Stoppable::stop()`** if you hold hardware state, and write it
+  assuming the SDK calls it on every reconfigure, not only on an explicit
+  Stop RPC.
+- **Do not declare a `reconfigure` method at all** -- there's no base class
+  virtual for it to override.
 
 ### 2. Driver Implementation
 
 **Camera drivers** (depth, RGB, point cloud):
-- Inherit `Camera` + `Reconfigurable`
+- Inherit `Camera` (config parsing goes in the constructor -- see
+  Reconfiguration above, no `Reconfigurable` mixin exists in v0.39.0+)
 - Share hardware context across instances (e.g., `rs2::context`)
 - Track serial numbers to avoid duplicate assignments
 - Stream frames in background, serve latest on API calls
@@ -99,16 +120,18 @@ Two patterns:
 - Respect the 32MB gRPC message size limit for point clouds
 
 **Arm drivers** (real-time control):
-- Inherit `Arm` + `Stoppable` + `Reconfigurable`
+- Inherit `Arm` + `Stoppable` (no `Reconfigurable` in v0.39.0+ -- `stop()`
+  also fires during reconfigure, see Reconfiguration above)
 - Use state machine for connection states
 - Use `std::shared_mutex` for read-heavy workloads (joint position queries)
 - Ship kinematics files alongside the binary
 - Trajectory planning via external libraries (trajex, TOTG)
 
 **ML model services** (inference):
-- Inherit `MLModelService` + `Stoppable` + `Reconfigurable`
+- Inherit `MLModelService` + `Stoppable` (no `Reconfigurable` in v0.39.0+)
 - Use `std::shared_mutex` -- read lock for concurrent inference, write lock
-  for reconfigure
+  in `stop()` so a reconfigure-triggered stop can't race an in-flight
+  `infer()` on the same instance
 - Create xtensor tensor_views from raw inference output
 - Handle type dispatching across int8/uint8/.../float32/float64
 
@@ -159,7 +182,8 @@ Two patterns:
 | Concurrent gRPC calls | Data races, crashes | Protect shared state with mutex/shared_mutex |
 | Stale frame data | get_image returns old data | Check frame timestamps; implement frame age validation |
 | Point cloud too large | gRPC error on get_point_cloud | Check size < 32MB; consider downsampling |
-| Thread deadlock in reconfigure | Hangs on reconfigure | Avoid holding multiple locks; use lock ordering or state replacement pattern |
+| Slow/blocking `stop()` hangs reconfigure | Reconfigure RPC times out, module looks frozen | `stop()` on the old instance runs synchronously before the new one is constructed (`module/service.cpp:131-133`); keep it fast and non-blocking -- don't wait on in-flight calls against the old instance, which may still be draining while `stop()` runs |
+| Copying the SDK's own tflite example's reconfigure | `error: ... marked 'final', but does not override` (or similar) on a `reconfigure()` method | `examples/modules/tflite/main.cpp` still declares `void reconfigure(...) final` but the class no longer inherits `Reconfigurable` (removed in `57140776`) -- that example does not currently compile; don't copy its lifecycle pattern, put config parsing in the constructor instead |
 | macOS framework linking | "undefined `_OBJC_CLASS_$_...`" | Link CoreAudio, AudioToolbox, etc. frameworks |
 | RPATH issues | "library not found" at runtime | Configure `CMAKE_INSTALL_RPATH` with `@loader_path` (macOS) or `$ORIGIN` (Linux) |
 
