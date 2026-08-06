@@ -17,7 +17,12 @@
 | `Discovery` | `Service` | `discover_resources()`, `do_command()` |
 | `GenericService` | `Service` | `do_command()` |
 
-**Mixins**: `Reconfigurable` (`reconfigure(deps, cfg)`), `Stoppable` (`stop(extra)`)
+**Mixins**: `Stoppable` (`stop(extra)` -- also invoked by the SDK during
+reconfiguration, not only on shutdown). There is no `Reconfigurable` mixin as
+of SDK v0.39.0 (removed in commit `57140776`, 2026-05-12, verified against
+`src/viam/sdk/` 2026-07-30) -- reconfiguration rebuilds the resource via its
+constructor instead. See `cpp-sdk-reference.md` section 1 ("Mixins") for the
+full mechanics.
 
 ---
 
@@ -56,19 +61,15 @@ install(FILES meta.json DESTINATION .)
 
 #include <viam/sdk/components/sensor.hpp>
 #include <viam/sdk/config/resource.hpp>
-#include <viam/sdk/resource/reconfigurable.hpp>
 
 namespace vsdk = ::viam::sdk;
 
-class MySensor final : public vsdk::Sensor, public vsdk::Reconfigurable {
+class MySensor final : public vsdk::Sensor {
 public:
     MySensor(vsdk::Dependencies deps, vsdk::ResourceConfig cfg);
     ~MySensor() override = default;
 
     static std::vector<std::string> validate(vsdk::ResourceConfig cfg);
-
-    void reconfigure(const vsdk::Dependencies& deps,
-                     const vsdk::ResourceConfig& cfg) override;
 
     vsdk::ProtoStruct get_readings(const vsdk::ProtoStruct& extra) override;
     std::vector<vsdk::GeometryConfig> get_geometries(const vsdk::ProtoStruct& extra) override;
@@ -77,6 +78,12 @@ public:
     static inline vsdk::Model model{"acme", "sensor", "my-sensor"};
 };
 ```
+
+No `reconfigure(...)` method: as of SDK v0.39.0 there's no `Reconfigurable`
+base to override. When config changes, viam-server's `ReconfigureResource`
+RPC discards this instance and calls the constructor above again with the
+new `ResourceConfig` (`module/service.cpp:144-146`) -- all config handling
+belongs there.
 
 ### src/my_component.cpp
 
@@ -94,13 +101,6 @@ MySensor::MySensor(vsdk::Dependencies deps, vsdk::ResourceConfig cfg)
 std::vector<std::string> MySensor::validate(vsdk::ResourceConfig cfg) {
     // Validate config, throw std::invalid_argument on errors
     return {};  // no implicit dependencies
-}
-
-void MySensor::reconfigure(const vsdk::Dependencies& deps,
-                            const vsdk::ResourceConfig& cfg) {
-    auto attrs = cfg.attributes();
-    // Re-parse config, update internal state
-    VIAM_RESOURCE_LOG(info) << "MySensor reconfigured";
 }
 
 vsdk::ProtoStruct MySensor::get_readings(const vsdk::ProtoStruct& extra) {

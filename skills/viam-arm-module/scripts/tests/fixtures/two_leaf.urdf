@@ -1,0 +1,24 @@
+<robot name="two_leaf">
+  <link name="base"/>
+  <link name="palm"/>
+  <link name="finger_l"/>
+  <link name="finger_r"/>
+  <joint name="j0" type="revolute">
+    <parent link="base"/><child link="palm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="1" velocity="1"/>
+  </joint>
+  <joint name="jl" type="revolute">
+    <parent link="palm"/><child link="finger_l"/>
+    <origin xyz="0.1 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="1" velocity="1"/>
+  </joint>
+  <joint name="jr" type="revolute">
+    <parent link="palm"/><child link="finger_r"/>
+    <origin xyz="-0.1 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="1" velocity="1"/>
+  </joint>
+</robot>

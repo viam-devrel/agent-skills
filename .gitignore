@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 
+# Dev/test environments for the bundled toolkits. `uv.lock` IS committed —
+# only the resolved environment and test caches are ignored.
+.venv/
+.pytest_cache/
+
 # Generated viam-server configs hold machine secrets — never commit them.
 viam-server.json
 *.viam-server.json

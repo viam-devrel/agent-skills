@@ -8,23 +8,23 @@
 ## 1. Camera Driver Pattern (RealSense + Orbbec)
 
 Both depth camera modules follow the same structural pattern: inherit from
-`viam::sdk::Camera` and `viam::sdk::Reconfigurable`, manage hardware lifecycle
-in constructor/destructor, stream frames in a background thread.
+`viam::sdk::Camera`, manage hardware lifecycle in constructor/destructor, and
+stream frames in a background thread. (The class declaration below shows the
+`Reconfigurable`-era design these modules were originally built against; as
+of SDK v0.39.0 there is no `Reconfigurable` mixin -- see section 5,
+"Reconfiguration," for the current constructor-based equivalent and a caveat
+about what's actually been verified.)
 
 ### Class declaration (from RealSense)
 
 ```cpp
-class Realsense final : public viam::sdk::Camera,
-                        public viam::sdk::Reconfigurable {
+class Realsense final : public viam::sdk::Camera {
 public:
     Realsense(viam::sdk::Dependencies deps,
               viam::sdk::ResourceConfig cfg,
               std::shared_ptr<RealsenseContext> ctx,
               std::shared_ptr<boost::synchronized_value<std::unordered_set<std::string>>> assigned_serials);
     ~Realsense();
-
-    void reconfigure(const viam::sdk::Dependencies& deps,
-                     const viam::sdk::ResourceConfig& cfg) override;
 
     // Camera interface:
     raw_image get_image(std::string mime_type, const viam::sdk::ProtoStruct& extra) override;
@@ -180,8 +180,12 @@ real-time control requirements, state machines, and kinematics.
 
 ### Class declaration
 
+Below is the `Reconfigurable`-era declaration this module was originally
+built against; as of SDK v0.39.0 there's no `Reconfigurable` mixin to inherit
+and no `reconfigure` override to declare (see section 5).
+
 ```cpp
-class URArm final : public Arm, public Reconfigurable {
+class URArm final : public Arm {
 public:
     static constexpr double k_default_robot_control_freq_hz = 100.0;
     static constexpr double k_default_max_trajectory_duration_secs = 600.0;
@@ -192,8 +196,6 @@ public:
 
     URArm(Model model, const Dependencies& deps, const ResourceConfig& cfg);
     ~URArm() override;
-
-    void reconfigure(const Dependencies& deps, const ResourceConfig& cfg) override;
 
     // Arm interface:
     std::vector<double> get_joint_positions(const ProtoStruct& extra) override;
@@ -324,17 +326,23 @@ target_link_libraries(universal-robots PRIVATE viam-ur)
 
 ### TFLite -- simple, single-model pattern
 
+**Stale-example warning**: the SDK's own copy of this example
+(`examples/modules/tflite/main.cpp`) has been only half-migrated off
+`Reconfigurable` -- its class no longer inherits `Reconfigurable`, but the
+`reconfigure(...)` method at `main.cpp:94-95` is still declared `final`,
+which requires a virtual base that no longer exists. That file does not
+currently compile against the SDK it ships with. Don't copy its lifecycle
+shape; the declaration below is corrected to the intended v0.39.0+ pattern
+(config parsing in the constructor, no `reconfigure` method):
+
 ```cpp
 class MLModelServiceTFLite final : public vsdk::MLModelService,
-                                    public vsdk::Stoppable,
-                                    public vsdk::Reconfigurable {
+                                    public vsdk::Stoppable {
 public:
     MLModelServiceTFLite(vsdk::Dependencies dependencies, vsdk::ResourceConfig configuration);
     ~MLModelServiceTFLite() final;
 
     void stop(const vsdk::ProtoStruct& extra) noexcept final;
-    void reconfigure(const vsdk::Dependencies& dependencies,
-                     const vsdk::ResourceConfig& configuration) final;
     std::shared_ptr<named_tensor_views> infer(const named_tensor_views& inputs,
                                               const vsdk::ProtoStruct& extra) final;
     struct metadata metadata(const vsdk::ProtoStruct& extra) final;
@@ -347,14 +355,22 @@ private:
 ```
 
 **State encapsulation pattern**: All mutable state is held in a private
-`state_` struct. `reconfigure()` creates a new state and swaps it in under
-a write lock. `infer()` takes a read lock, enabling concurrent inference:
+`state_` struct. The constructor builds `state_` directly (there's no
+`reconfigure()` to swap it in later -- reconfiguration now destroys this
+whole object and constructs a new one, see section 5). `infer()` takes a
+read lock on `state_rwmutex_`, enabling concurrent inference; `stop()` takes
+the write lock so it can't race an in-flight `infer()` when the SDK calls it
+during reconfiguration:
 
 ```cpp
-void reconfigure(const vsdk::Dependencies& deps, const vsdk::ResourceConfig& cfg) final {
-    auto new_state = configure_(std::move(deps), std::move(cfg));
+MLModelServiceTFLite::MLModelServiceTFLite(vsdk::Dependencies deps, vsdk::ResourceConfig cfg)
+    : MLModelService(cfg.name()) {
+    state_ = configure_(std::move(deps), std::move(cfg));
+}
+
+void stop(const vsdk::ProtoStruct& extra) noexcept final {
     std::unique_lock lock(state_rwmutex_);
-    state_ = std::move(new_state);
+    // release interpreter/model resources
 }
 
 std::shared_ptr<named_tensor_views> infer(const named_tensor_views& inputs,
@@ -425,9 +441,11 @@ The audio module is the simplest pattern -- a good starting template.
 
 ### Class declaration (Microphone)
 
+Shown corrected for SDK v0.39.0+ (no `Reconfigurable`, no `reconfigure`
+override -- config parsing happens once, in the constructor):
+
 ```cpp
-class Microphone final : public viam::sdk::AudioIn,
-                          public viam::sdk::Reconfigurable {
+class Microphone final : public viam::sdk::AudioIn {
 public:
     Microphone(viam::sdk::Dependencies deps, viam::sdk::ResourceConfig cfg,
                audio::portaudio::PortAudioInterface* pa = nullptr);
@@ -443,7 +461,6 @@ public:
                    const viam::sdk::ProtoStruct& extra);
     viam::sdk::audio_properties get_properties(const viam::sdk::ProtoStruct& extra);
     std::vector<viam::sdk::GeometryConfig> get_geometries(const viam::sdk::ProtoStruct& extra);
-    void reconfigure(const viam::sdk::Dependencies& deps, const viam::sdk::ResourceConfig& cfg);
 
     static vsdk::Model model;
 private:
@@ -525,32 +542,69 @@ Microphone(viam::sdk::Dependencies deps, viam::sdk::ResourceConfig cfg,
 
 ---
 
-## 5. Reconfiguration Patterns
+## 5. Reconfiguration (destroy-and-reconstruct, v0.39.0+)
 
-### Full state replacement (TFLite, UR)
+**There is no `reconfigure()` method to implement.** The `Reconfigurable`
+mixin was removed from the SDK in commit `57140776` ("remove reconfigurable
+(#630)", 2026-05-12); grepping `src/viam/sdk/` for a virtual `reconfigure`
+turns up nothing (checked 2026-07-30 against v0.39.0). Every class
+declaration above showing `Reconfigurable` + `reconfigure(...)` reflects the
+pre-v0.39.0 design these modules were originally built against and would not
+compile as-is against a current SDK.
 
-Create a new state object and swap:
+### What actually happens on the `ReconfigureResource` RPC
+
+1. The module looks up the existing resource by name.
+2. If it implements `Stoppable`, the SDK calls `stop()` on it
+   (`module/service.cpp:131-133`).
+3. `ResourceManager::replace_one` erases the old entry first
+   (`do_remove`, which drops the manager's `shared_ptr` and -- absent other
+   references -- runs the old instance's destructor), then calls the
+   model's factory to build a brand-new object
+   (`do_add(name, create_resource())`, `resource/resource_manager.cpp:142-151`).
+4. That factory is `ModelRegistration::construct_resource`, i.e. your
+   constructor `(Dependencies, ResourceConfig)`
+   (`registry/registry.hpp:73-82`, `module/service.cpp:144-146`).
+
+Net effect: **stop the old instance, destroy it, construct a new one with
+the new config.** There is no in-place mutation step to hook -- destructor
+and constructor still run as normal RAII, just triggered by reconfiguration
+instead of process shutdown/startup.
+
+### Porting the two patterns that used to live in `reconfigure()`
+
+- **"Full state replacement"** (TFLite, UR): this is now the *only* shape
+  available, and the SDK performs it at the object level for you. Whatever
+  used to run inside `configure_()` during `reconfigure()` now runs directly
+  in the constructor.
+- **"In-place reconfiguration"** (RealSense: stop device, reconfigure,
+  restart): the stop/restart halves still make sense, they just move --
+  "stop" into `stop()` (or the destructor), "restart with new config" into
+  the constructor. Nothing plays the role of the old in-between
+  `reconfigureDevice()` call; there's no live object to hand a diff to
+  anymore.
 
 ```cpp
-void reconfigure(const Dependencies& deps, const ResourceConfig& cfg) override {
-    auto new_state = configure_(deps, cfg);
-    std::unique_lock lock(state_rwmutex_);
-    state_ = std::move(new_state);
+// Constructor now does what configure_()+reconfigure() used to split across two calls:
+MyResource::MyResource(Dependencies deps, ResourceConfig cfg)
+    : Camera(cfg.name()) {
+    state_ = configure_(std::move(deps), std::move(cfg));  // was: reconfigure()'s job
 }
 ```
 
-### In-place reconfiguration (RealSense)
+Watch for the gotcha this creates: `stop()` on the *old* instance runs
+before the *new* instance exists, and any RPCs already in flight against the
+old instance may still be draining while that happens -- a `stop()` written
+to assume "the user asked me to shut down" will misbehave when it's really
+mid-reconfigure.
 
-For cameras where the device pipeline can be reused:
-
-```cpp
-void reconfigure(const Dependencies& deps, const ResourceConfig& cfg) override {
-    device_funcs_.stopDevice(device_, this->logger_);
-    config_ = configure(deps, cfg);
-    device_funcs_.reconfigureDevice(device_, config_, this->logger_);
-    device_funcs_.startDevice(serial, device_, latest_frameset_, ...);
-}
-```
+**Scope note:** only the SDK source (`~/src/viam-cpp-sdk`, v0.39.0) was
+checked for this rewrite. Whether the production RealSense/Orbbec/UR/
+Triton/system-audio repos referenced throughout this file have themselves
+been ported off `Reconfigurable` was not verified -- treat the
+`Reconfigurable`/`reconfigure()` snippets elsewhere in this file as
+historical illustrations of *what state needs handling*, not as
+copy-pasteable current code.
 
 ---
 

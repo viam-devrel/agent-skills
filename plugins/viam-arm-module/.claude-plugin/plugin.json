@@ -1,0 +1,10 @@
+{
+  "name": "viam-arm-module",
+  "version": "0.1.0",
+  "description": "Viam arm module builder: kinematics validation, simulated model, driver, and packaging, in Go, Python, or C++. Bundles the armkit offline validator.",
+  "author": { "name": "Viam DevRel", "url": "https://github.com/viam-devrel" },
+  "homepage": "https://github.com/viam-devrel/agent-skills",
+  "repository": "https://github.com/viam-devrel/agent-skills",
+  "license": "Apache-2.0",
+  "keywords": ["viam", "arm", "kinematics", "modules"]
+}
